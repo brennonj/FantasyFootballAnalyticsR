@@ -1,5 +1,11 @@
 # Live ESPN draft board with VONA-based pick recommendations.
-# Run with: shiny::runApp("R Scripts/Draft Tool/draft_board_app.R")
+#
+# Run ./start-draft-board.sh from the project root; it serves this at the
+# fixed address http://127.0.0.1:3838 and checks the credentials and
+# projections files are in place first.
+#
+# To run it directly instead:
+#   shiny::runApp("R Scripts/Draft Tool/draft_board_app.R", port = 3838)
 #
 # Requires Config/espn_credentials.R and
 # Data/ffanalytics_raw_scrape_<season>.rds (from
