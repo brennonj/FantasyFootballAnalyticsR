@@ -127,6 +127,7 @@ body {
   display: inline-block; margin-right: 7px;
   box-shadow: 0 0 0 0 rgba(12,163,12,0.7); animation: pulse 2.4s infinite;
 }
+.livedot.dead { background: var(--crit); animation: none; box-shadow: none; }
 @keyframes pulse {
   0%%   { box-shadow: 0 0 0 0 rgba(12,163,12,0.55); }
   70%%  { box-shadow: 0 0 0 7px rgba(12,163,12,0); }
@@ -245,7 +246,7 @@ ui <- fluidPage(
       h1("DRAFT COMMAND"),
       span(class = "micro", paste0(espn_team_name, " · ", espn_season, " · full PPR")),
       span(class = "micro", style = "margin-left:auto;",
-           span(class = "livedot"), textOutput("last_sync", inline = TRUE))
+           uiOutput("sync_status", inline = TRUE))
   ),
   uiOutput("order_notice"),
   uiOutput("hero"),
@@ -275,12 +276,23 @@ ui <- fluidPage(
 server <- function(input, output, session) {
 
   draft_raw <- reactiveVal(NULL)
-  last_sync <- reactiveVal(NULL)
+  last_sync <- reactiveVal(NULL)      # last *successful* fetch
+  last_attempt <- reactiveVal(NULL)   # every cycle, so the status keeps ticking
+  sync_failed <- reactiveVal(FALSE)
 
+  # A failed poll keeps the last good board rather than blanking it - mid-draft,
+  # slightly stale data beats an empty screen. But the timestamp must not
+  # advance on failure, or an expired cookie looks identical to a healthy feed.
   refresh_draft <- function() {
     d <- tryCatch(suppressWarnings(ff_draft(conn)), error = function(e) NULL)
-    draft_raw(d)
-    last_sync(Sys.time())
+    if (is.null(d)) {
+      sync_failed(TRUE)
+    } else {
+      draft_raw(d)
+      last_sync(Sys.time())
+      sync_failed(FALSE)
+    }
+    last_attempt(Sys.time())
   }
 
   observe({
@@ -289,9 +301,22 @@ server <- function(input, output, session) {
   })
   observeEvent(input$refresh, refresh_draft())
 
-  output$last_sync <- renderText({
+  output$sync_status <- renderUI({
+    last_attempt()  # dependency: re-render every poll so "N min ago" advances
     ts <- last_sync()
-    if (is.null(ts)) "connecting" else paste("synced", format(ts, "%H:%M:%S"))
+    failed <- isTRUE(sync_failed())
+
+    if (is.null(ts)) {
+      return(tagList(span(class = if (failed) "livedot dead" else "livedot"),
+                     if (failed) "cannot reach ESPN" else "connecting"))
+    }
+    if (failed) {
+      mins <- floor(as.numeric(difftime(Sys.time(), ts, units = "mins")))
+      return(tagList(span(class = "livedot dead"),
+                     sprintf("STALE - no sync for %d min (last %s)",
+                             mins, format(ts, "%H:%M:%S"))))
+    }
+    tagList(span(class = "livedot"), paste("synced", format(ts, "%H:%M:%S")))
   })
 
   # Draft state, reduced to what the recommender needs.
