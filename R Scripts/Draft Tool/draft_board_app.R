@@ -128,6 +128,13 @@ body {
   border-radius: 10px; padding: 16px 18px; margin-bottom: 16px;
 }
 .hero { border-left: 2px solid var(--accent); }
+.target { border-left: 2px solid var(--good); }
+.notice {
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 2px solid var(--warn); border-radius: 8px;
+  padding: 11px 15px; margin-bottom: 16px; font-size: 12.5px; color: var(--ink-2);
+}
+.notice .micro { display: block; color: var(--warn); margin-bottom: 3px; }
 .hero .name {
   font-size: 34px; font-weight: 680; letter-spacing: -0.02em;
   line-height: 1.1; margin: 6px 0 2px;
@@ -231,6 +238,7 @@ ui <- fluidPage(
       span(class = "micro", style = "margin-left:auto;",
            span(class = "livedot"), textOutput("last_sync", inline = TRUE))
   ),
+  uiOutput("order_notice"),
   uiOutput("hero"),
   uiOutput("tiles"),
   fluidRow(
@@ -247,6 +255,7 @@ ui <- fluidPage(
       )
     ),
     column(5,
+      div(class = "card target", h4("Your next pick · likely available"), uiOutput("my_targets")),
       div(class = "card", h4("Next best alternatives"), uiOutput("alternatives")),
       div(class = "card", h4("Positional scarcity"), uiOutput("scarcity")),
       div(class = "card", h4("Your roster"), uiOutput("roster"))
@@ -288,6 +297,11 @@ server <- function(input, output, session) {
     their_picks <- upcoming %>% filter(franchise_id == on_clock$franchise_id)
     my_picks <- upcoming %>% filter(franchise_id == my_franchise_id)
 
+    # The pick to plan ahead for. If we're already on the clock, the hero panel
+    # covers this pick, so look ahead to the one after it instead.
+    i <- if (on_clock$franchise_id == my_franchise_id) 2L else 1L
+    at <- function(k) if (nrow(my_picks) >= k) my_picks$overall[k] else NA_integer_
+
     list(
       complete = FALSE,
       done = done,
@@ -295,7 +309,10 @@ server <- function(input, output, session) {
       next_pick = if (nrow(their_picks) > 1) their_picks$overall[2] else NA_integer_,
       rounds_left = nrow(their_picks),
       my_next = if (nrow(my_picks) > 0) my_picks$overall[1] else NA_integer_,
-      my_rounds_left = nrow(my_picks)
+      my_rounds_left = nrow(my_picks),
+      my_target_pick = at(i),
+      my_target_next = at(i + 1L),
+      my_target_rounds = max(nrow(my_picks) - (i - 1L), 0L)
     )
   })
 
@@ -318,6 +335,68 @@ server <- function(input, output, session) {
       slots = slots,
       rounds_left = st$rounds_left,
       top_n = 6
+    )
+  })
+
+  output$order_notice <- renderUI({
+    d <- draft_raw()
+    if (is.null(d)) return(NULL)
+    chk <- pick_order_check(d)
+    if (chk$pattern != "irregular") return(NULL)
+    div(class = "notice", span(class = "micro", "Check draft order"), chk$detail)
+  })
+
+  # Shortlist for our own next pick: players more likely than not to still be
+  # there, ranked by what they'd be worth to this roster at that point.
+  my_targets <- reactive({
+    st <- state()
+    if (is.null(st) || isTRUE(st$complete) || is.na(st$my_target_pick)) return(NULL)
+
+    cand <- available() %>%
+      mutate(avail_at_target = survival_prob(adp_avg, adp_sd, st$my_target_pick)) %>%
+      filter(avail_at_target >= 0.5)
+    if (nrow(cand) == 0) return(NULL)
+
+    recommend_picks(
+      board = cand,
+      picks_so_far = st$done %>% select(franchise_id, pos),
+      franchise_id = my_franchise_id,
+      current_pick = st$my_target_pick,
+      next_pick = st$my_target_next,
+      slots = slots,
+      rounds_left = st$my_target_rounds,
+      top_n = 3
+    )
+  })
+
+  output$my_targets <- renderUI({
+    st <- state()
+    if (is.null(st) || isTRUE(st$complete)) return(div(class = "micro", "—"))
+    if (is.na(st$my_target_pick)) return(div(class = "micro", "No further picks"))
+    t <- my_targets()
+    if (is.null(t) || nrow(t) == 0) return(div(class = "micro", "No likely targets"))
+
+    away <- st$my_target_pick - st$on_clock$overall
+    tagList(
+      div(class = "micro", style = "margin-bottom:11px;",
+          sprintf("Pick %d · %d picks away", st$my_target_pick, away)),
+      lapply(seq_len(nrow(t)), function(i) {
+        a <- t[i, ]
+        # Drop the survival phrase from the shared reason string: it is measured
+        # against the pick *after* this one and would read as a contradiction
+        # next to the availability figure on this row.
+        sub <- Filter(function(s) !grepl("gone by pick", s),
+                      strsplit(a$why, " · ")[[1]])
+        div(class = "alt-row",
+            HTML(pos_badge(a$pos)),
+            div(class = "alt-name", a$player,
+                br(),
+                span(class = "alt-why",
+                     paste(c(paste0("VOR ", round(a$points_vor)), sub), collapse = " · "))),
+            div(class = "alt-score", style = "color:var(--good)",
+                paste0(round(100 * a$avail_at_target), "%"))
+        )
+      })
     )
   })
 

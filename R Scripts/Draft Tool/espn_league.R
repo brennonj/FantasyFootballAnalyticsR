@@ -91,3 +91,45 @@ espn_roster_needs <- function(conn) {
   sp <- ff_starter_positions(conn)
   setNames(sp$max, sp$pos)
 }
+
+# Checks whether the draft board's pick order is internally consistent.
+#
+# Everything downstream - "picks away", the VONA horizon, next-pick targets -
+# reads pick ownership straight off ESPN's board. Before a draft starts that
+# board can hold provisional rows, so a round that breaks the pattern means
+# those numbers may shift once the draft goes live. Report it rather than
+# quietly planning against an order that may not hold.
+pick_order_check <- function(draft_board) {
+  d <- draft_board[order(draft_board$overall), ]
+  rounds <- split(d$franchise_id, d$round)
+  rounds <- rounds[order(as.integer(names(rounds)))]
+  if (length(rounds) < 2) return(list(pattern = "unknown", detail = NULL))
+
+  r1 <- rounds[[1]]
+  shape <- vapply(rounds, function(o) {
+    if (identical(o, r1)) "fwd" else if (identical(o, rev(r1))) "rev" else "other"
+  }, character(1))
+
+  scrambled <- which(shape == "other")
+  if (length(scrambled) > 0) {
+    return(list(pattern = "irregular", detail = sprintf(
+      "Round%s %s %s neither round 1's order nor its reverse, so pick ownership may be provisional.",
+      if (length(scrambled) == 1) "" else "s", paste(scrambled, collapse = ", "),
+      if (length(scrambled) == 1) "matches" else "match")))
+  }
+
+  if (all(shape == "fwd")) return(list(pattern = "linear", detail = NULL))
+
+  # A snake never runs the same order twice in a row, whichever phase it starts on.
+  repeats <- which(shape[-1] == shape[-length(shape)]) + 1L
+  if (length(repeats) == 0) return(list(pattern = "snake", detail = NULL))
+
+  list(
+    pattern = "irregular",
+    detail = sprintf(
+      "Round%s %s repeat%s the previous round's order instead of reversing; the remaining rounds do alternate. Before draft day, confirm your pick slots in ESPN - these numbers drive \"picks away\" and the next-pick targets.",
+      if (length(repeats) == 1) "" else "s",
+      paste(repeats, collapse = ", "),
+      if (length(repeats) == 1) "s" else "")
+  )
+}
