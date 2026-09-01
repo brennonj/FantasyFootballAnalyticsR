@@ -169,3 +169,8 @@ pip-log.txt
 
 *.Rhistory
 .Rhistory
+
+#############
+## Local secrets - never commit league credentials
+#############
+Config/espn_credentials.R
