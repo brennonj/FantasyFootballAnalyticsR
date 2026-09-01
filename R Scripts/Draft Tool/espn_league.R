@@ -10,7 +10,24 @@ suppressMessages({
 })
 
 espn_league_connect <- function(league_id, season, espn_s2, swid) {
-  espn_connect(season = season, league_id = league_id, espn_s2 = espn_s2, swid = swid)
+  conn <- espn_connect(season = season, league_id = league_id,
+                       espn_s2 = espn_s2, swid = swid)
+
+  # espn_connect() does not itself talk to ESPN, so a dead cookie would other-
+  # wise surface much later as an opaque parse error. Fail here, with the fix.
+  tryCatch(
+    ff_franchises(conn),
+    error = function(e) stop(
+      "Could not read league ", league_id, " from ESPN.\n",
+      "The espn_s2 / SWID cookies in Config/espn_credentials.R have most ",
+      "likely expired (espn_s2 lasts about a year, and a logout or password ",
+      "change ends it sooner).\n",
+      "Refresh them: log in to ESPN Fantasy, then DevTools > Application > ",
+      "Cookies > fantasy.espn.com, and copy espn_s2 and SWID.\n",
+      "Underlying error: ", conditionMessage(e), call. = FALSE)
+  )
+
+  conn
 }
 
 # Maps an ff_scoring() tibble (ESPN's flat stat_name/points table) onto
