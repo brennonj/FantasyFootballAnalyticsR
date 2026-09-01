@@ -13,16 +13,33 @@
 
 suppressMessages(library(dplyr))
 
+# Where each player on the board is actually expected to go.
+#
+# Raw ADP is a redraft-market prior over a FULL pool, and it goes stale the
+# moment this draft diverges from that pool. Keepers are the worst case: they
+# remove players without consuming a pick, so everyone behind them lasts longer
+# than ADP claims. A player still sitting on the board at pick 18 with an ADP of
+# 9 is evidence that this room is passing on him - not proof he is already gone,
+# which is what a static prior would insist.
+#
+# Ranking only the players who are ACTUALLY available and laying them out from
+# the current pick is self-correcting: keepers, reaches and runs all show up as
+# changes in who remains, with no special handling for any of them.
+add_implied_slot <- function(board, current_pick) {
+  board$implied_slot <- current_pick +
+    rank(board$adp_avg, ties.method = "first", na.last = TRUE) - 1
+  board
+}
+
 # Probability a player is still on the board when `target_pick` comes up.
 #
-# Models the realized draft slot as Normal(adp, sigma). adp_sd measures how
-# much the ADP *sources* disagree with each other, which badly understates
-# real draft-day variance at the top of the board (the consensus 1.01 has
-# adp_sd ~0.3, but he is not a 99.9% lock to go first). So sigma floors at
-# both an absolute 3 picks and 14% of ADP.
-survival_prob <- function(adp, adp_sd, target_pick) {
-  sigma <- pmax(adp_sd, 0.14 * adp, 3, na.rm = TRUE)
-  p <- 1 - pnorm(target_pick - 0.5, mean = adp, sd = sigma)
+# Models the realized slot as Normal(expected_slot, sigma). adp_sd measures how
+# much the ADP *sources* disagree with each other, which badly understates real
+# draft-day variance (the consensus 1.01 has adp_sd ~0.3, but he is not a 99.9%
+# lock to go first), so sigma floors at both 3 picks and 14% of the slot.
+survival_prob <- function(expected_slot, adp_sd, target_pick) {
+  sigma <- pmax(adp_sd, 0.14 * expected_slot, 3, na.rm = TRUE)
+  p <- 1 - pnorm(target_pick - 0.5, mean = expected_slot, sd = sigma)
   pmin(pmax(p, 0), 1)
 }
 
@@ -150,8 +167,8 @@ recommend_picks <- function(board, picks_so_far, franchise_id, current_pick,
   # With no future pick to wait for, opportunity cost is just the player's value.
   horizon <- if (is.na(next_pick)) current_pick + 1 else next_pick
 
-  board <- board %>%
-    mutate(surv_next = survival_prob(adp_avg, adp_sd, horizon))
+  board <- add_implied_slot(board, current_pick) %>%
+    mutate(surv_next = survival_prob(implied_slot, adp_sd, horizon))
 
   pos_expectations <- lapply(positions, function(p) {
     pb <- board[board$pos == p, ]
