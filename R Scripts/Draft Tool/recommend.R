@@ -146,11 +146,15 @@ recommend_picks <- function(board, picks_so_far, franchise_id, current_pick,
         slot_max  = slots$max[slots$pos == pos],
         rounds_left = rounds_left
       ),
-      # VONA alone collapses toward zero at the turn of a snake, where back-to-back
-      # picks mean almost nothing gets sniped in between and the ordering becomes
-      # noise. The raw-value term breaks those ties toward the better player
-      # without displacing VONA when scarcity is genuinely in play.
-      score = need_mult * (vona + 0.15 * points_vor)
+      # Value leads; timing adjusts. VONA measures only what is lost between this
+      # pick and the next one, which badly overstates positions with a steep top
+      # and a shallow tail: elite QB looks urgent because QB2 is far below QB1,
+      # even though a 1-QB league needs exactly one and can wait rounds for him.
+      # Letting VONA dominate put a QB ahead of a running back with a 50-point
+      # larger VOR edge. Half weight keeps scarcity influential - it still lifts
+      # a thin-position starter over a marginally better pick at a deep one -
+      # without letting a local timing gap outrank a large value gap.
+      score = need_mult * (points_vor + 0.5 * vona)
     ) %>%
     ungroup() %>%
     arrange(desc(score))

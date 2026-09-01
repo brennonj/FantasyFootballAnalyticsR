@@ -50,7 +50,10 @@ adp_tbl <- tryCatch(
   error = function(e) tibble(id = character(), adp_avg = numeric(), adp_sd = numeric())
 )
 
-full_board <- projections_table(raw_scrape, scoring_rules = league_scoring) %>%
+vor_baseline <- league_vor_baseline(conn, slots)
+
+full_board <- projections_table(raw_scrape, scoring_rules = league_scoring,
+                                vor_baseline = vor_baseline) %>%
   filter(avg_type == "average") %>%
   left_join(player_lookup, by = "id") %>%
   left_join(espn_id_crosswalk, by = "id") %>%
@@ -290,7 +293,17 @@ server <- function(input, output, session) {
     d <- draft_raw()
     if (is.null(d)) return(NULL)
     done <- d %>% filter(drafted %in% TRUE)
-    upcoming <- d %>% filter(!(drafted %in% TRUE)) %>% arrange(overall)
+
+    # Keeper slots are assigned, not picked. Until they are filled they sit on
+    # the board as undrafted, and treating them as live picks would both put a
+    # recommendation on a slot nobody drafts into and shift every pick number
+    # that follows. Plan against real picks only; once keepers are locked in
+    # they become drafted rows and drop out of here on their own.
+    kr <- keeper_rounds(d)
+    pending_keepers <- d %>% filter(!(drafted %in% TRUE), round %in% kr)
+    upcoming <- d %>%
+      filter(!(drafted %in% TRUE), !(round %in% kr)) %>%
+      arrange(overall)
     if (nrow(upcoming) == 0) return(list(complete = TRUE))
 
     on_clock <- upcoming[1, ]
@@ -305,6 +318,7 @@ server <- function(input, output, session) {
     list(
       complete = FALSE,
       done = done,
+      pending_keepers = pending_keepers,
       on_clock = on_clock,
       next_pick = if (nrow(their_picks) > 1) their_picks$overall[2] else NA_integer_,
       rounds_left = nrow(their_picks),
@@ -341,9 +355,27 @@ server <- function(input, output, session) {
   output$order_notice <- renderUI({
     d <- draft_raw()
     if (is.null(d)) return(NULL)
+    st <- state()
+
+    notices <- list()
+
+    n_pending <- if (is.null(st) || isTRUE(st$complete)) 0 else nrow(st$pending_keepers)
+    if (n_pending > 0) {
+      kr <- keeper_rounds(d)
+      notices <- c(notices, list(div(class = "notice",
+        span(class = "micro", "Keepers not assigned yet"),
+        sprintf("Round %s is the keeper round and %d of its slots are still empty. Until ESPN records who is being kept, those players still show here as available - expect the top of the board to thin out sharply once keepers lock.",
+                paste(kr, collapse = ", "), n_pending))))
+    }
+
     chk <- pick_order_check(d)
-    if (chk$pattern != "irregular") return(NULL)
-    div(class = "notice", span(class = "micro", "Check draft order"), chk$detail)
+    if (chk$pattern == "irregular") {
+      notices <- c(notices, list(div(class = "notice",
+        span(class = "micro", "Check draft order"), chk$detail)))
+    }
+
+    if (length(notices) == 0) return(NULL)
+    tagList(notices)
   })
 
   # Shortlist for our own next pick: players more likely than not to still be

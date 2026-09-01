@@ -92,6 +92,37 @@ espn_roster_needs <- function(conn) {
   setNames(sp$max, sp$pos)
 }
 
+# Replacement level per position for VOR, derived from what this league
+# actually starts rather than ffanalytics's generic default (which assumes a
+# deeper league: RB35/WR36 baselines overstate RB and WR value in a 10-team
+# format). Replacement is the last player at a position who would be starting
+# somewhere in the league, so it is teams x starters, with the flex slot split
+# across the positions eligible to fill it.
+league_vor_baseline <- function(conn, slots) {
+  n_teams <- nrow(ff_franchises(conn))
+  sp <- ff_starter_positions(conn)
+  starters <- setNames(as.integer(sp$min), unname(as.character(sp$pos)))
+
+  base <- c("QB", "RB", "WR", "TE")
+  flex <- max(as.integer(sp$offense_starters[1]) - sum(starters[base], na.rm = TRUE), 0)
+
+  # PPR flex skews to receivers, with tight ends a distant third.
+  flex_share <- c(RB = 0.40, WR = 0.45, TE = 0.15)
+
+  needs <- starters
+  for (p in names(flex_share)) {
+    if (!is.na(needs[p])) needs[p] <- needs[p] + flex * flex_share[[p]]
+  }
+
+  round(setNames(n_teams * needs[names(needs)], names(needs)))
+}
+
+# Rounds reserved for keepers. ESPN flags every slot in such a round with
+# can_keeper, so the keeper round is read off the board rather than assumed.
+keeper_rounds <- function(draft_board) {
+  sort(unique(draft_board$round[draft_board$can_keeper %in% TRUE]))
+}
+
 # Checks whether the draft board's pick order is internally consistent.
 #
 # Everything downstream - "picks away", the VONA horizon, next-pick targets -
@@ -99,23 +130,31 @@ espn_roster_needs <- function(conn) {
 # board can hold provisional rows, so a round that breaks the pattern means
 # those numbers may shift once the draft goes live. Report it rather than
 # quietly planning against an order that may not hold.
+#
+# Keeper rounds are excluded: their slots are assigned, not drafted in order,
+# so they carry no snake obligation and would otherwise look like a break.
 pick_order_check <- function(draft_board) {
   d <- draft_board[order(draft_board$overall), ]
+  d <- d[!(d$round %in% keeper_rounds(d)), ]
+  if (nrow(d) == 0) return(list(pattern = "unknown", detail = NULL))
   rounds <- split(d$franchise_id, d$round)
   rounds <- rounds[order(as.integer(names(rounds)))]
   if (length(rounds) < 2) return(list(pattern = "unknown", detail = NULL))
 
-  r1 <- rounds[[1]]
+  # Indices address the filtered list, so map back to real round numbers.
+  label <- names(rounds)
+  base <- rounds[[1]]
   shape <- vapply(rounds, function(o) {
-    if (identical(o, r1)) "fwd" else if (identical(o, rev(r1))) "rev" else "other"
+    if (identical(o, base)) "fwd" else if (identical(o, rev(base))) "rev" else "other"
   }, character(1))
 
   scrambled <- which(shape == "other")
   if (length(scrambled) > 0) {
     return(list(pattern = "irregular", detail = sprintf(
-      "Round%s %s %s neither round 1's order nor its reverse, so pick ownership may be provisional.",
-      if (length(scrambled) == 1) "" else "s", paste(scrambled, collapse = ", "),
-      if (length(scrambled) == 1) "matches" else "match")))
+      "Round%s %s %s neither round %s's order nor its reverse, so pick ownership may be provisional.",
+      if (length(scrambled) == 1) "" else "s",
+      paste(label[scrambled], collapse = ", "),
+      if (length(scrambled) == 1) "matches" else "match", label[1])))
   }
 
   if (all(shape == "fwd")) return(list(pattern = "linear", detail = NULL))
@@ -129,7 +168,7 @@ pick_order_check <- function(draft_board) {
     detail = sprintf(
       "Round%s %s repeat%s the previous round's order instead of reversing; the remaining rounds do alternate. Before draft day, confirm your pick slots in ESPN - these numbers drive \"picks away\" and the next-pick targets.",
       if (length(repeats) == 1) "" else "s",
-      paste(repeats, collapse = ", "),
+      paste(label[repeats], collapse = ", "),
       if (length(repeats) == 1) "s" else "")
   )
 }
