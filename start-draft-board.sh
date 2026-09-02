@@ -8,8 +8,13 @@
 set -euo pipefail
 
 PORT=3838
-URL="http://127.0.0.1:${PORT}"
 APP="R Scripts/Draft Tool/draft_board_app.R"
+
+# Loopback by default: the board has no login of any kind, and the R process
+# holds a live authenticated ESPN session. Bind wider only deliberately.
+#   DRAFT_BOARD_HOST=0.0.0.0 ./start-draft-board.sh   # reachable on the LAN
+HOST="${DRAFT_BOARD_HOST:-127.0.0.1}"
+URL="http://127.0.0.1:${PORT}"
 
 # The app resolves Config/ and Data/ relative to its own location, so run from
 # the project root regardless of where this was invoked.
@@ -51,6 +56,17 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 echo "Draft board  ->  $URL"
+
+if [ "$HOST" != "127.0.0.1" ] && [ "$HOST" != "localhost" ]; then
+  lan="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)"
+  [ -n "$lan" ] && echo "On this network ->  http://${lan}:${PORT}"
+  echo
+  echo "NOTE: bound to ${HOST}. The board has no login, and this process holds a"
+  echo "      live ESPN session. Anything that can route here can read it - so if"
+  echo "      port ${PORT} is forwarded at the router, it is open to the internet."
+  echo
+fi
+
 echo "Loading league settings, draft state and ADP (~30-40s on first start)..."
 
-exec Rscript -e "shiny::runApp('${APP}', port = ${PORT}, launch.browser = TRUE)"
+exec Rscript -e "shiny::runApp('${APP}', port = ${PORT}, host = '${HOST}', launch.browser = TRUE)"
