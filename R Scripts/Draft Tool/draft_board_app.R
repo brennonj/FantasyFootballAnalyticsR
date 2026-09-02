@@ -415,8 +415,8 @@ server <- function(input, output, session) {
     st <- state()
     if (is.null(st) || isTRUE(st$complete) || is.na(st$my_target_pick)) return(NULL)
 
-    cand <- available() %>%
-      mutate(avail_at_target = survival_prob(adp_avg, adp_sd, st$my_target_pick)) %>%
+    cand <- add_implied_slot(available(), st$on_clock$overall) %>%
+      mutate(avail_at_target = survival_prob(implied_slot, adp_sd, st$my_target_pick)) %>%
       filter(avail_at_target >= 0.5)
     if (nrow(cand) == 0) return(NULL)
 
@@ -582,14 +582,23 @@ server <- function(input, output, session) {
       if (is.na(st$my_next)) NA else st$my_next
 
     out <- full_board %>% mutate(drafted = drafted_mask(full_board, done))
+
+    # Implied slots must be ranked across everyone still available, before any
+    # display filter - ranking within a single position would place every QB as
+    # though only quarterbacks were being drafted.
+    on_clock_pick <- if (is.null(st) || isTRUE(st$complete)) 1 else st$on_clock$overall
+    idx <- which(!out$drafted)   # positional, since dual-eligible players share an id
+    undrafted <- add_implied_slot(out[idx, ], on_clock_pick)
+    out$Avail <- NA_real_
+    if (!is.na(horizon)) {
+      out$Avail[idx] <-
+        round(100 * survival_prob(undrafted$implied_slot, undrafted$adp_sd, horizon))
+    }
+
     if (isTRUE(input$hide_drafted)) out <- filter(out, !drafted)
     if (input$pos_filter != "All") out <- filter(out, pos == input$pos_filter)
 
     out <- out %>%
-      mutate(
-        Avail = if (is.na(horizon)) NA_real_ else
-          round(100 * survival_prob(adp_avg, adp_sd, horizon))
-      ) %>%
       transmute(
         Player = player,
         Pos = vapply(pos, pos_badge, character(1)),

@@ -13,16 +13,33 @@
 
 suppressMessages(library(dplyr))
 
+# Where each player on the board is actually expected to go.
+#
+# Raw ADP is a redraft-market prior over a FULL pool, and it goes stale the
+# moment this draft diverges from that pool. Keepers are the worst case: they
+# remove players without consuming a pick, so everyone behind them lasts longer
+# than ADP claims. A player still sitting on the board at pick 18 with an ADP of
+# 9 is evidence that this room is passing on him - not proof he is already gone,
+# which is what a static prior would insist.
+#
+# Ranking only the players who are ACTUALLY available and laying them out from
+# the current pick is self-correcting: keepers, reaches and runs all show up as
+# changes in who remains, with no special handling for any of them.
+add_implied_slot <- function(board, current_pick) {
+  board$implied_slot <- current_pick +
+    rank(board$adp_avg, ties.method = "first", na.last = TRUE) - 1
+  board
+}
+
 # Probability a player is still on the board when `target_pick` comes up.
 #
-# Models the realized draft slot as Normal(adp, sigma). adp_sd measures how
-# much the ADP *sources* disagree with each other, which badly understates
-# real draft-day variance at the top of the board (the consensus 1.01 has
-# adp_sd ~0.3, but he is not a 99.9% lock to go first). So sigma floors at
-# both an absolute 3 picks and 14% of ADP.
-survival_prob <- function(adp, adp_sd, target_pick) {
-  sigma <- pmax(adp_sd, 0.14 * adp, 3, na.rm = TRUE)
-  p <- 1 - pnorm(target_pick - 0.5, mean = adp, sd = sigma)
+# Models the realized slot as Normal(expected_slot, sigma). adp_sd measures how
+# much the ADP *sources* disagree with each other, which badly understates real
+# draft-day variance (the consensus 1.01 has adp_sd ~0.3, but he is not a 99.9%
+# lock to go first), so sigma floors at both 3 picks and 14% of the slot.
+survival_prob <- function(expected_slot, adp_sd, target_pick) {
+  sigma <- pmax(adp_sd, 0.14 * expected_slot, 3, na.rm = TRUE)
+  p <- 1 - pnorm(target_pick - 0.5, mean = expected_slot, sd = sigma)
   pmin(pmax(p, 0), 1)
 }
 
@@ -46,31 +63,59 @@ expected_best_available <- function(values, surv, depth = 24) {
   sum(v * p_is_best) + (1 - sum(p_is_best)) * min(v)
 }
 
-# How much a position is worth to THIS roster right now.
+# The flex is ONE slot shared by RB/WR/TE, but ESPN reports each of those
+# positions' max as its dedicated slots plus the flex - so the maxes sum to more
+# lineup spots than exist (RB3 + WR3 + TE2 = 8 for six real slots). Deriving the
+# count keeps every position from believing it owns the flex outright.
+derive_flex_slots <- function(slots) {
+  fe <- slots[slots$pos %in% c("RB", "WR", "TE"), ]
+  if (nrow(fe) == 0) return(0L)
+  as.integer(max(fe$max - fe$min, na.rm = TRUE))
+}
+
+# How much each position is worth to THIS roster right now.
 #
-# A 4th RB when the starting slots are full is bench depth, not a starter
-# upgrade, so it gets discounted. Kickers and defenses are suppressed until
-# the last two rounds because taking one early forfeits a real starter.
-need_multiplier <- function(pos, n_filled, slot_min, slot_max, rounds_left) {
-  flex_eligible <- pos %in% c("RB", "WR", "TE")
+# Computed across the whole roster rather than per position, because whether a
+# player is a starter depends on what else is already rostered: the second tight
+# end is only startable if nothing has claimed the flex yet. Kickers and
+# defenses stay suppressed until the last two rounds, since taking one early
+# forfeits a real starter.
+roster_multipliers <- function(filled, slots, rounds_left,
+                               flex_slots = derive_flex_slots(slots)) {
+  pos <- slots$pos
+  mins <- setNames(slots$min, pos)
+  flex_pos <- intersect(pos, c("RB", "WR", "TE"))
 
-  mult <- if (n_filled < slot_min) {
-    1
-  } else if (n_filled < slot_max) {
-    if (flex_eligible) 0.8 else 0.4
-  } else {
-    if (flex_eligible) 0.5 else if (pos == "QB") 0.25 else 0.1
-  }
+  dedicated_left <- setNames(pmax(mins[pos] - filled[pos], 0), pos)
+  claimed_flex <- sum(pmax(filled[flex_pos] - mins[flex_pos], 0))
+  flex_open <- max(flex_slots - claimed_flex, 0)
 
-  if (pos %in% c("K", "DST")) {
-    if (rounds_left > 2) mult <- mult * 0.12
-    if (n_filled >= 1) mult <- 0.05
-  }
+  starters_left <- sum(dedicated_left) + flex_open
+  urgent <- starters_left >= rounds_left
 
-  # Running out of rounds to fill a mandatory slot makes it urgent.
-  if (n_filled < slot_min && rounds_left <= slot_min - n_filled + 1) mult <- mult * 1.4
+  setNames(vapply(pos, function(p) {
+    m <- if (dedicated_left[[p]] > 0) {
+      1                                            # fills a dedicated slot
+    } else if (p %in% flex_pos && flex_open > 0) {
+      0.55                                         # only the flex left, and RB/WR/TE all compete for it
+    } else if (p %in% flex_pos) {
+      0.3                                          # bench depth
+    } else if (p == "QB") {
+      0.15
+    } else {
+      0.05
+    }
 
-  mult
+    if (p %in% c("K", "DST")) {
+      if (rounds_left > 2) m <- m * 0.12
+      if (filled[[p]] >= 1) m <- 0.05
+    }
+
+    # Running out of picks to fill mandatory slots makes them urgent.
+    if (urgent && dedicated_left[[p]] > 0) m <- m * 1.4
+
+    m
+  }, numeric(1)), pos)
 }
 
 # Tier state for a position: how many players are left in the top remaining
@@ -117,12 +162,13 @@ recommend_picks <- function(board, picks_so_far, franchise_id, current_pick,
 
   positions <- slots$pos
   filled <- roster_filled(picks_so_far, franchise_id, positions)
+  pos_mult <- roster_multipliers(filled, slots, rounds_left)
 
   # With no future pick to wait for, opportunity cost is just the player's value.
   horizon <- if (is.na(next_pick)) current_pick + 1 else next_pick
 
-  board <- board %>%
-    mutate(surv_next = survival_prob(adp_avg, adp_sd, horizon))
+  board <- add_implied_slot(board, current_pick) %>%
+    mutate(surv_next = survival_prob(implied_slot, adp_sd, horizon))
 
   pos_expectations <- lapply(positions, function(p) {
     pb <- board[board$pos == p, ]
@@ -139,13 +185,7 @@ recommend_picks <- function(board, picks_so_far, franchise_id, current_pick,
     mutate(
       e_best_later = pos_expectations[[pos]]$e_best,
       vona = points_vor - e_best_later,
-      need_mult = need_multiplier(
-        pos,
-        n_filled  = filled[[pos]],
-        slot_min  = slots$min[slots$pos == pos],
-        slot_max  = slots$max[slots$pos == pos],
-        rounds_left = rounds_left
-      ),
+      need_mult = pos_mult[[pos]],
       # Value leads; timing adjusts. VONA measures only what is lost between this
       # pick and the next one, which badly overstates positions with a steep top
       # and a shallow tail: elite QB looks urgent because QB2 is far below QB1,
