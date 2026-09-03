@@ -173,4 +173,12 @@ pip-log.txt
 #############
 ## Local secrets - never commit league credentials
 #############
-Config/espn_credentials.R
+# Unanchored on purpose. "Config/espn_credentials.R" contains a slash, so git
+# anchors it to the repo root and it would NOT match a copy living deeper -
+# a checkout under .claude/worktrees/ being the case that bit us.
+espn_credentials.R
+
+#############
+## Claude Code local state (settings, worktrees) - not project code
+#############
+.claude/
