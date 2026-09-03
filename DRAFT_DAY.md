@@ -21,6 +21,21 @@ Rscript "R Scripts/Projections/ffanalytics/pull_season_projections.R"
 ./start-draft-board.sh
 ```
 
+**Off your home network?** Don't port-forward the web board to the internet -
+it has no login, and a bare HTTP connection to a residential IP routinely
+trips ISP/router "Advanced Security" filters anyway (Safari shows this as a
+block page you can't get past). Instead, SSH in and run the terminal version,
+which needs no port forwarding or browser:
+
+```bash
+ssh you@this-mac "cd ~/Developer/FantasyFootball && ./draft-board-tui.sh"
+```
+
+Same recommendations, same 15s ESPN polling, computed by the same R code as
+the web board - just rendered as a terminal UI instead of HTML. `p` cycles
+the position filter, `h` toggles hide-drafted, `q` quits (and stops the
+poller with it).
+
 Then confirm, in the header:
 
 - **Green dot + a ticking "synced" time.** Red means the feed is dead — see

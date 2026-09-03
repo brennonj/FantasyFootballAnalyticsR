@@ -15,81 +15,22 @@ suppressMessages({
   library(shiny)
   library(DT)
   library(dplyr)
-  library(ffscrapr)
-  library(ffanalytics)
 })
 
 # shiny::runApp() on a single-file app sets the working directory to this
 # script's own folder, so anchor paths relative to that, not the repo root.
-repo_root <- normalizePath(file.path(getwd(), "..", ".."))
-source(file.path(repo_root, "Config", "espn_credentials.R"))
-source(file.path(getwd(), "espn_league.R"))
-source(file.path(getwd(), "recommend.R"))
-
-conn <- espn_league_connect(espn_league_id, espn_season, espn_s2, espn_swid)
-
-league_scoring <- translate_espn_scoring(ff_scoring(conn))
-slots <- ff_starter_positions(conn) %>%
-  transmute(pos = unname(as.character(pos)), min = as.integer(min), max = as.integer(max))
-
-franchises <- ff_franchises(conn)
-my_franchise_id <- franchises$franchise_id[franchises$franchise_name == espn_team_name]
-if (length(my_franchise_id) == 0) {
-  stop("espn_team_name '", espn_team_name, "' not found among franchises: ",
-       paste(franchises$franchise_name, collapse = ", "))
-}
-
-raw_scrape <- readRDS(file.path(repo_root, "Data",
-                                paste0("ffanalytics_raw_scrape_", espn_season, ".rds")))
-
-player_lookup <- bind_rows(raw_scrape, .id = "pos_src") %>%
-  group_by(id) %>%
-  summarise(player = first(player), team = first(team), .groups = "drop")
-
-espn_id_crosswalk <- bind_rows(raw_scrape, .id = "pos_src") %>%
-  filter(data_src == "ESPN") %>%
-  distinct(id, src_id) %>%
-  rename(espn_id = src_id)
-
-adp_tbl <- tryCatch(
-  get_adp(sources = c("RTS", "CBS", "Yahoo", "FFC", "MFL"), metric = "adp"),
-  error = function(e) tibble(id = character(), adp_avg = numeric(), adp_sd = numeric())
-)
-
-vor_baseline <- league_vor_baseline(conn, slots)
-
-full_board <- projections_table(raw_scrape, scoring_rules = league_scoring,
-                                vor_baseline = vor_baseline) %>%
-  filter(avg_type == "average") %>%
-  left_join(player_lookup, by = "id") %>%
-  left_join(espn_id_crosswalk, by = "id") %>%
-  left_join(adp_tbl[, c("id", "adp_avg", "adp_sd")], by = "id") %>%
-  mutate(
-    player = if_else(is.na(player) & pos == "DST", paste(team, "DST"), player),
-    # Players with no ADP are effectively undrafted-caliber; park them past the
-    # end of the board so the survival model treats them as near-certain to last.
-    adp_avg = if_else(is.na(adp_avg), 250, adp_avg)
-  ) %>%
-  arrange(desc(points_vor)) %>%
-  select(id, espn_id, player, pos, team, points, points_vor, floor, ceiling,
-         tier, pos_rank, adp_avg, adp_sd)
-
-POS_COLORS <- c(QB = "#3987e5", RB = "#d95926", WR = "#199e70",
-                TE = "#c98500", K = "#d55181", DST = "#008300")
-
-# A handful of projected players carry no ESPN id in the scrape, so id matching
-# alone would leave them on the board after someone drafts them. Name is the
-# fallback key.
-norm_name <- function(x) gsub("[^a-z]", "", tolower(ifelse(is.na(x), "", x)))
-
-full_board$match_name <- norm_name(full_board$player)
-
-drafted_mask <- function(board, done) {
-  if (is.null(done) || nrow(done) == 0) return(rep(FALSE, nrow(board)))
-  board$espn_id %in% done$player_id |
-    (!is.na(board$match_name) & board$match_name != "" &
-       board$match_name %in% norm_name(done$player_name))
-}
+# draft_board_setup.R and draft_state.R are shared with the SSH/TUI snapshot
+# poller (draft_board_snapshot.R) so both frontends compute picks identically.
+#
+# local = TRUE matters here: shiny::runApp() sources a single-file app into a
+# fresh, non-global environment, but source()'s own default (local = FALSE)
+# always evaluates the sourced file in .GlobalEnv - so without this, the
+# setup/state files can't see draft_tool_dir/repo_root, and the objects they
+# define wouldn't be visible to the rest of this app either.
+draft_tool_dir <- getwd()
+repo_root <- normalizePath(file.path(draft_tool_dir, "..", ".."))
+source(file.path(draft_tool_dir, "draft_board_setup.R"), local = TRUE)
+source(file.path(draft_tool_dir, "draft_state.R"), local = TRUE)
 
 app_css <- sprintf("
 :root {
@@ -243,7 +184,7 @@ pos_badge <- function(pos) {
 ui <- fluidPage(
   tags$head(tags$style(HTML(app_css))),
   div(class = "topbar",
-      h1("DRAFT COMMAND"),
+      h1("BRENNON\'S DRAFT COMMAND CENTER"),
       span(class = "micro", paste0(espn_team_name, " · ", espn_season, " · full PPR")),
       span(class = "micro", style = "margin-left:auto;",
            uiOutput("sync_status", inline = TRUE))
@@ -319,118 +260,24 @@ server <- function(input, output, session) {
     tagList(span(class = "livedot"), paste("synced", format(ts, "%H:%M:%S")))
   })
 
-  # Draft state, reduced to what the recommender needs.
-  state <- reactive({
-    d <- draft_raw()
-    if (is.null(d)) return(NULL)
-    done <- d %>% filter(drafted %in% TRUE)
+  state <- reactive(compute_state(draft_raw(), my_franchise_id))
 
-    # Keeper slots are assigned, not picked. Until they are filled they sit on
-    # the board as undrafted, and treating them as live picks would both put a
-    # recommendation on a slot nobody drafts into and shift every pick number
-    # that follows. Plan against real picks only; once keepers are locked in
-    # they become drafted rows and drop out of here on their own.
-    kr <- keeper_rounds(d)
-    pending_keepers <- d %>% filter(!(drafted %in% TRUE), round %in% kr)
-    upcoming <- d %>%
-      filter(!(drafted %in% TRUE), !(round %in% kr)) %>%
-      arrange(overall)
-    if (nrow(upcoming) == 0) return(list(complete = TRUE))
+  available <- reactive(compute_available(full_board, state(), drafted_mask))
 
-    on_clock <- upcoming[1, ]
-    their_picks <- upcoming %>% filter(franchise_id == on_clock$franchise_id)
-    my_picks <- upcoming %>% filter(franchise_id == my_franchise_id)
-
-    # The pick to plan ahead for. If we're already on the clock, the hero panel
-    # covers this pick, so look ahead to the one after it instead.
-    i <- if (on_clock$franchise_id == my_franchise_id) 2L else 1L
-    at <- function(k) if (nrow(my_picks) >= k) my_picks$overall[k] else NA_integer_
-
-    list(
-      complete = FALSE,
-      done = done,
-      pending_keepers = pending_keepers,
-      on_clock = on_clock,
-      next_pick = if (nrow(their_picks) > 1) their_picks$overall[2] else NA_integer_,
-      rounds_left = nrow(their_picks),
-      my_next = if (nrow(my_picks) > 0) my_picks$overall[1] else NA_integer_,
-      my_rounds_left = nrow(my_picks),
-      my_target_pick = at(i),
-      my_target_next = at(i + 1L),
-      my_target_rounds = max(nrow(my_picks) - (i - 1L), 0L)
-    )
-  })
-
-  available <- reactive({
-    st <- state()
-    if (is.null(st) || isTRUE(st$complete)) return(full_board)
-    full_board[!drafted_mask(full_board, st$done), ]
-  })
-
-  recs <- reactive({
-    st <- state()
-    if (is.null(st) || isTRUE(st$complete)) return(NULL)
-    picks_so_far <- st$done %>% select(franchise_id, pos)
-    recommend_picks(
-      board = available(),
-      picks_so_far = picks_so_far,
-      franchise_id = st$on_clock$franchise_id,
-      current_pick = st$on_clock$overall,
-      next_pick = st$next_pick,
-      slots = slots,
-      rounds_left = st$rounds_left,
-      top_n = 6
-    )
-  })
+  recs <- reactive(compute_recs(available(), state(), slots, top_n = 6))
 
   output$order_notice <- renderUI({
     d <- draft_raw()
     if (is.null(d)) return(NULL)
-    st <- state()
-
-    notices <- list()
-
-    n_pending <- if (is.null(st) || isTRUE(st$complete)) 0 else nrow(st$pending_keepers)
-    if (n_pending > 0) {
-      kr <- keeper_rounds(d)
-      notices <- c(notices, list(div(class = "notice",
-        span(class = "micro", "Keepers not assigned yet"),
-        sprintf("Round %s is the keeper round and %d of its slots are still empty. Until ESPN records who is being kept, those players still show here as available - expect the top of the board to thin out sharply once keepers lock.",
-                paste(kr, collapse = ", "), n_pending))))
-    }
-
-    chk <- pick_order_check(d)
-    if (chk$pattern == "irregular") {
-      notices <- c(notices, list(div(class = "notice",
-        span(class = "micro", "Check draft order"), chk$detail)))
-    }
-
+    notices <- compute_order_notices(d, state())
     if (length(notices) == 0) return(NULL)
-    tagList(notices)
+    tagList(lapply(notices, function(n) div(class = "notice",
+      span(class = "micro", n$title), n$detail)))
   })
 
   # Shortlist for our own next pick: players more likely than not to still be
   # there, ranked by what they'd be worth to this roster at that point.
-  my_targets <- reactive({
-    st <- state()
-    if (is.null(st) || isTRUE(st$complete) || is.na(st$my_target_pick)) return(NULL)
-
-    cand <- add_implied_slot(available(), st$on_clock$overall) %>%
-      mutate(avail_at_target = survival_prob(implied_slot, adp_sd, st$my_target_pick)) %>%
-      filter(avail_at_target >= 0.5)
-    if (nrow(cand) == 0) return(NULL)
-
-    recommend_picks(
-      board = cand,
-      picks_so_far = st$done %>% select(franchise_id, pos),
-      franchise_id = my_franchise_id,
-      current_pick = st$my_target_pick,
-      next_pick = st$my_target_next,
-      slots = slots,
-      rounds_left = st$my_target_rounds,
-      top_n = 3
-    )
-  })
+  my_targets <- reactive(compute_my_targets(available(), state(), slots, my_franchise_id, top_n = 3))
 
   output$my_targets <- renderUI({
     st <- state()
@@ -529,9 +376,8 @@ server <- function(input, output, session) {
   # Startable players remaining per position: how many are still projected
   # above this league's replacement level (VOR > 0).
   output$scarcity <- renderUI({
-    av <- available()
-    counts <- sapply(names(POS_COLORS), function(p) sum(av$pos == p & av$points_vor > 0))
-    max_n <- max(counts, 1)
+    counts <- compute_scarcity(available(), names(POS_COLORS))
+    max_n <- max(unlist(counts), 1)
     tagList(lapply(names(POS_COLORS), function(p) {
       n <- counts[[p]]
       div(class = "meter-row",
@@ -546,10 +392,10 @@ server <- function(input, output, session) {
   })
 
   output$roster <- renderUI({
-    st <- state()
-    if (is.null(st) || isTRUE(st$complete)) return(div(class = "micro", "—"))
-    mine <- st$done %>% filter(franchise_id == my_franchise_id) %>% arrange(overall)
-    filled <- roster_filled(st$done %>% select(franchise_id, pos), my_franchise_id, slots$pos)
+    r <- compute_roster(state(), slots, my_franchise_id)
+    if (is.null(r)) return(div(class = "micro", "—"))
+    mine <- r$mine
+    filled <- r$filled
 
     need_rows <- lapply(slots$pos, function(p) {
       have <- filled[[p]]
@@ -576,24 +422,7 @@ server <- function(input, output, session) {
   })
 
   output$board <- renderDT({
-    st <- state()
-    done <- if (is.null(st) || isTRUE(st$complete)) NULL else st$done
-    horizon <- if (is.null(st) || isTRUE(st$complete)) NA else
-      if (is.na(st$my_next)) NA else st$my_next
-
-    out <- full_board %>% mutate(drafted = drafted_mask(full_board, done))
-
-    # Implied slots must be ranked across everyone still available, before any
-    # display filter - ranking within a single position would place every QB as
-    # though only quarterbacks were being drafted.
-    on_clock_pick <- if (is.null(st) || isTRUE(st$complete)) 1 else st$on_clock$overall
-    idx <- which(!out$drafted)   # positional, since dual-eligible players share an id
-    undrafted <- add_implied_slot(out[idx, ], on_clock_pick)
-    out$Avail <- NA_real_
-    if (!is.na(horizon)) {
-      out$Avail[idx] <-
-        round(100 * survival_prob(undrafted$implied_slot, undrafted$adp_sd, horizon))
-    }
+    out <- compute_annotated_board(full_board, state(), drafted_mask)
 
     if (isTRUE(input$hide_drafted)) out <- filter(out, !drafted)
     if (input$pos_filter != "All") out <- filter(out, pos == input$pos_filter)

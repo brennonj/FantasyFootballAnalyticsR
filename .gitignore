@@ -182,3 +182,9 @@ espn_credentials.R
 ## Claude Code local state (settings, worktrees) - not project code
 #############
 .claude/
+
+#############
+## Draft Board TUI - local Python env and generated snapshot, not project code
+#############
+Draft Board TUI/.venv/
+Data/draft_board_snapshot.json
