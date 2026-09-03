@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Launches the live draft board at a fixed local URL.
 #
-#   ./start-draft-board.sh
+#   ./start-draft-board.sh          this machine only
+#   ./start-draft-board.sh --lan    also reachable from phones/tablets
 #
 # Stop it with Ctrl-C.
 
@@ -12,8 +13,18 @@ APP="R Scripts/Draft Tool/draft_board_app.R"
 
 # Loopback by default: the board has no login of any kind, and the R process
 # holds a live authenticated ESPN session. Bind wider only deliberately.
-#   DRAFT_BOARD_HOST=0.0.0.0 ./start-draft-board.sh   # reachable on the LAN
+# A flag rather than only an env var, because an env prefix is easy to drop
+# between shells and the failure is silent - it just binds loopback again.
 HOST="${DRAFT_BOARD_HOST:-127.0.0.1}"
+for arg in "$@"; do
+  case "$arg" in
+    --lan|--all) HOST="0.0.0.0" ;;
+    -h|--help)
+      sed -n '2,6p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) echo "unknown option: $arg (try --lan or --help)" >&2; exit 2 ;;
+  esac
+done
 URL="http://127.0.0.1:${PORT}"
 
 # The app resolves Config/ and Data/ relative to its own location, so run from
