@@ -188,3 +188,28 @@ espn_credentials.R
 #############
 Draft Board TUI/.venv/
 Data/draft_board_snapshot.json
+
+#############
+## Lineup Optimizer TUI - local Python env and generated snapshot, not project code
+#############
+Lineup Optimizer TUI/.venv/
+Data/lineup_snapshot.json
+__pycache__/
+
+#############
+## Waiver Wire TUI - local Python env and generated snapshot, not project code
+#############
+Waiver Wire TUI/.venv/
+Data/waiver_snapshot.json
+
+#############
+## Trade Evaluator TUI - local Python env and generated snapshot, not project code
+#############
+Trade Evaluator TUI/.venv/
+Data/trade_snapshot.json
+
+# Weekly projections are meant to be re-pulled each week, not preserved as
+# history the way the season pull is (see "Refresh 2026 season projections").
+Data/ffanalytics_raw_scrape_week*.rds
+Data/ffanalytics_projections_week*.rds
+Data/ffanalytics_projections_week*.csv
