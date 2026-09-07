@@ -291,7 +291,13 @@ class BoardTable(DataTable):
     """Available-players table. Owns its own filter state so toggling
     position/hide-drafted doesn't require a fresh JSON read."""
 
-    board = reactive(list, always_update=True)
+    # No always_update: the R poller rewrites the snapshot every 15s even when
+    # nothing changed, so without this, an unchanged board list would still
+    # compare equal here and get skipped for free. Every other panel's `data`
+    # reactive relies on the same default equality check - board was the one
+    # outlier forcing a full clear+rebuild (visible flicker, cursor reset to
+    # row 0) on every single poll regardless of whether anything moved.
+    board = reactive(list)
     pos_filter = reactive("All")
     hide_drafted = reactive(True)
 
@@ -309,19 +315,37 @@ class BoardTable(DataTable):
         self._redraw()
 
     def _redraw(self):
+        # A real change (a pick landing, a filter toggle) still means a full
+        # clear+rebuild, since DataTable has no "diff these rows in place"
+        # API - but clear() resets the cursor to row 0, which reads as the
+        # board reordering under you. Re-anchor on the previously selected
+        # player by name instead of by row index, since row index shifts
+        # whenever a row above the cursor disappears (hide_drafted).
+        prior_player = None
+        if self.row_count and self.cursor_row is not None:
+            try:
+                prior_player = str(self.get_row_at(self.cursor_row)[0])
+            except Exception:
+                prior_player = None
+
         self.clear()
         rows = self.board
         if self.hide_drafted:
             rows = [r for r in rows if not r.get("drafted")]
         if self.pos_filter != "All":
             rows = [r for r in rows if r["pos"] == self.pos_filter]
-        for r in rows:
+        restore_row = None
+        for i, r in enumerate(rows):
             avail = "—" if r.get("avail_pct") is None else f"{r['avail_pct']:.0f}"
             self.add_row(
                 r["player"], pos_badge(r["pos"]), r["team"],
                 f"{r['points']:.1f}", f"{r['points_vor']:.1f}",
                 f"{r['adp_avg']:.1f}", avail, str(r.get("tier", "—")),
             )
+            if prior_player is not None and r["player"] == prior_player:
+                restore_row = i
+        if restore_row is not None:
+            self.move_cursor(row=restore_row)
 
 
 class DraftBoardApp(App):

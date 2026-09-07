@@ -61,9 +61,17 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 
 SNAPSHOT="Data/draft_board_snapshot.json"
+POLLER_LOG="Data/draft_board_poller.log"
 rm -f "$SNAPSHOT"
 
-Rscript "R Scripts/Draft Tool/draft_board_snapshot.R" &
+# Redirected, not inherited: the poller's own cat() progress lines would
+# otherwise land on this same terminal that the Textual app takes over below,
+# writing raw text at whatever the cursor's position happens to be and
+# corrupting the TUI's display - it showed up as stray "[HH:MM:SS] wrote
+# snapshot (ok)" text stuck over the header/notices panel, since Textual only
+# repaints a region when that region's own content changes and has no way to
+# know another process just wrote over it.
+Rscript "R Scripts/Draft Tool/draft_board_snapshot.R" > "$POLLER_LOG" 2>&1 &
 POLLER_PID=$!
 trap 'kill "$POLLER_PID" 2>/dev/null || true' EXIT
 

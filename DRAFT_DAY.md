@@ -41,8 +41,14 @@ Then confirm, in the header:
 - **Green dot + a ticking "synced" time.** Red means the feed is dead — see
   Troubleshooting.
 - If the amber *keepers not assigned* banner is showing, all 10 keepers
-  (including Amon-Ra) are still on the board. They drop off automatically when
-  the commissioner locks them — no restart needed.
+  (including Amon-Ra) are still on the board. That's driven by ESPN's own
+  `drafted` flag on the league, not by whether keepers are designated or
+  locked in league settings — owners can have their keepers picked and the
+  commissioner can have them locked, and the board will still show this
+  banner (confirmed live via ESPN's API on 2026-09-06) until the draft room
+  itself actually opens. It clears automatically the moment ESPN flips that
+  flag — no restart needed — but not a moment before, so don't read a
+  still-showing banner as a sign something needs fixing or re-locking.
 
 ---
 
