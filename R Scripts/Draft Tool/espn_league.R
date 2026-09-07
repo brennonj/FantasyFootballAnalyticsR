@@ -30,6 +30,21 @@ espn_league_connect <- function(league_id, season, espn_s2, swid) {
   conn
 }
 
+# ff_draft()'s `drafted` (and `in_progress`) columns are not per-pick status -
+# they're ESPN's whole-draft-level flags (has the entire draft finished / is a
+# draft currently running, from mDraftDetail's top-level fields) recycled onto
+# every pick row by tibble::as_tibble()+unnest_wider(). That leaves `drafted`
+# FALSE for every row, keepers included, for the entire draft night - it only
+# flips once the very last pick of the season is made. The only field that
+# actually reflects "has ESPN assigned a player to this slot" is player_id,
+# which is -1 for a still-open slot. Overwrite `drafted` with that before
+# anything downstream (draft_state.R) reads it.
+fetch_draft <- function(conn) {
+  d <- ff_draft(conn)
+  d$drafted <- d$player_id != -1
+  d
+}
+
 # Maps an ff_scoring() tibble (ESPN's flat stat_name/points table) onto
 # ffanalytics::custom_scoring() arguments. Falls back silently on any
 # stat_name ffanalytics has no equivalent bucket for (e.g. exotic IDP

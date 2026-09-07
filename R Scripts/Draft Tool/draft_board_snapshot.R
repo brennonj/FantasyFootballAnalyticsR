@@ -72,7 +72,7 @@ cat(sprintf("Draft board snapshot poller -> %s (every 15s, Ctrl-C to stop)\n", s
 # rather than looking like a healthy feed.
 last_sync <- NULL
 repeat {
-  d <- tryCatch(suppressWarnings(ff_draft(conn)), error = function(e) NULL)
+  d <- tryCatch(suppressWarnings(fetch_draft(conn)), error = function(e) NULL)
   sync_failed <- is.null(d)
   if (!sync_failed) last_sync <- Sys.time()
 
