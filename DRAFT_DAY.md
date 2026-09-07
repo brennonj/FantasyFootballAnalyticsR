@@ -73,35 +73,60 @@ Gaps alternate **5, 15, 5, 15…** That single fact should drive every decision:
 
 ## 3. Recommended order
 
+**Superseded by the actual 2026 keepers.** Confirmed against the real
+projections board (2026-09-06): besides Amon-Ra, nine other keepers are
+locked in league-wide, and they gut exactly the plan this section used to
+recommend — both McBride and Bowers (your TE1/TE2 target), three of the top
+four RBs (Jahmyr Gibbs, Bijan Robinson, Christian McCaffrey), and three more
+top-tier WRs (Puka Nacua, Ja'Marr Chase, Justin Jefferson). None of those ten
+players will ever hit the board. ESPN's live feed won't show it until the
+draft room actually opens (see Troubleshooting), so ignore any hero/alternative
+recommendation that names one of them once the draft starts — the tool will
+correct itself the moment ESPN's `drafted` flag flips, but not before.
+
 ```
-R2 (18)   TE  ←  Trey McBride
-R3 (23)   RB
+R2 (18)   RB/WR  ←  best player available, TE no longer the lock
+R3 (23)   RB/WR  ←  whichever side got strip-mined in the dark stretch
 R4 (38)   RB
 R5 (43)   WR
 R6-R8     QB
+R9-R11ish TE      ←  once VOR is competitive with the rest of the board
 ...
 R15 (143) K        R16 (158) DST
 ```
 
-**Pick 18 — TE, Trey McBride.** The one unambiguous call. He's VOR 96 with the
-next TE at 77 and a cliff to 35 after that, at the thinnest position in the
-league (11 above replacement vs 23 each at RB/WR). If both he and Bowers are
-gone, **don't reach for TE3** — take the best RB instead.
+**TE is no longer the round-2 lock.** With both McBride (VOR 90) and Bowers
+(VOR 76) kept elsewhere, the position's cliff moved down a full tier: the
+next TE is Colston Loveland at VOR 35 — exactly the "cliff to 35" this doc
+already flagged as the fallback scenario, except now it's the actual board,
+not a hedge. A VOR-35 TE1 isn't worth reaching for at 18. **Treat TE like
+K/DST** — draft it once its VOR stops being a clear downgrade from the best
+RB/WR left, not on a fixed round.
 
-**Picks 23 / 38 / 43 — two RBs and a WR.** The order among them depends on what
-the other nine teams kept, which is unknowable until it happens. Simulating both
-extremes, the *sequence* changed but the *shape* never did: you finish round 5
-with **2 RB, 2 WR (Amon-Ra plus one), 1 TE**. Let the board pick the order.
+**Picks 18 and 23 — best RB/WR available.** Removing Gibbs/Robinson/McCaffrey
+drops the RB ceiling to Jonathan Taylor (VOR 106) — a real tier below the
+three that just disappeared. Removing Nacua/Chase/Jefferson does the same to
+WR, except Jaxon Smith-Njigba (VOR 103) is a genuinely strong replacement,
+nearly as valuable as the departed WR1s. Scarcity dropped too (20 RB / 19 WR
+/ **9 TE** above replacement, down from 23 / 23 / 11) but the *shape* of the
+old advice still holds — let the board and availability % pick the order
+between 18 and 23, don't force a position.
 
-**QB rounds 6–8.** Don't pay early. QB collapses to near-zero VOR right after
-QB1 — the gap between the QB you get in round 2 and round 8 is small, and the
-tool suppresses QB accordingly once one is rostered.
+**Revised target shape by round 5:** with elite TE off the table, aim for
+something closer to **3 RB, 2 WR (Amon-Ra plus one)** rather than the old 2
+RB / 2 WR / 1 TE, and pick up a TE opportunistically whenever one's VOR
+stops being a clear downgrade from the RB/WR you'd otherwise take.
+
+**QB rounds 6–8 — unchanged.** Josh Allen (VOR 59) wasn't touched by any of
+the ten keepers and is still the clear QB1; the position still collapses to
+near-zero VOR right after QB1 goes, so don't pay early.
 
 **K and DST at 143 and 158, never sooner.** The tool actively suppresses them
 until the final two rounds. Taking one early forfeits a real starter.
 
-**Your keeper is doing work here.** Amon-Ra covers WR1, which is exactly why you
-can afford TE-then-RB and let WR wait.
+**Your keeper is doing work here.** Amon-Ra covers WR1, which is exactly why
+you can spend 18 and 23 on best-player-available RB/WR instead of needing to
+fill WR early, and let TE sit until its value catches up.
 
 ---
 
