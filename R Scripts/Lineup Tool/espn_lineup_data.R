@@ -31,19 +31,28 @@ espn_slot_id_map <- c(
 
 espn_pos_id_map <- c(`1` = "QB", `2` = "RB", `3` = "WR", `4` = "TE", `5` = "K", `16` = "DST")
 
-# A compound slot name ("RB/WR/TE", ESPN's FLEX) or plain one ("RB") both
-# describe the base positions a player is eligible to start at in that slot.
-# Splitting on "/" handles both without special-casing FLEX/OP.
-slot_base_positions <- function(slot_name) strsplit(slot_name, "/", fixed = TRUE)
-
-# Every base position a player can start at, derived from the union of their
-# eligible ESPN slots (excludes BE/IR, which aren't starting positions).
+# A player's ESPN eligibleSlots always includes every compound flex slot
+# their default position could theoretically fill in *some* league (e.g. a
+# WR is always flagged eligible for ESPN's "RB/WR" and "WR/TE" two-way flex
+# codes, on top of "WR" itself) - regardless of whether this league actually
+# has that slot. Splitting a compound name like "RB/WR/TE" into its base
+# parts and unioning them into the player's eligible set (the previous
+# approach here) therefore makes every flex-eligible RB/WR/TE player look
+# eligible for *all three* dedicated pools, not just the shared flex pool -
+# a real WR would get placed in the dedicated RB pool. Single-position names
+# ("RB") are kept as-is; the one compound name this tool actually models a
+# pool for ("RB/WR/TE", build_slot_pools' flex pool) is kept as its own
+# pseudo-position so it can be matched against that pool by exact name
+# instead. Other compounds (ESPN's narrower two-way flex codes, OP) are
+# dropped - this tool has no pool for them, so splitting them the old way
+# only introduced false positional eligibility.
 # Slot ids outside espn_slot_id_map (IDP/taxi-squad slots this league doesn't
 # use) come in as NA rather than a name - drop those rather than leaking a
 # literal "NA" into the position set.
 player_eligible_positions <- function(eligible_slot_names) {
-  parts <- unlist(slot_base_positions(eligible_slot_names))
-  parts <- parts[!is.na(parts)]
+  parts <- eligible_slot_names[!is.na(eligible_slot_names) &
+                                  (!grepl("/", eligible_slot_names, fixed = TRUE) |
+                                     eligible_slot_names == "RB/WR/TE")]
   unique(setdiff(parts, c("BE", "IR")))
 }
 
@@ -96,7 +105,14 @@ espn_full_rosters <- function(conn) {
       current_slot = unname(espn_slot_id_map[as.character(current_slot_id)]),
       eligible_pos = purrr::map(eligible_slot_ids,
                                 ~ unname(espn_slot_id_map[as.character(.x)])),
-      injury_status = coalesce(injury_status, "ACTIVE"),
+      # hoist() leaves injury_status as a list column when some entries are
+      # structurally absent from ESPN's JSON (NULL, not NA) rather than
+      # simplifying to an atomic vector - coalesce() doesn't reach inside a
+      # list column, so normalize element-by-element first.
+      injury_status = purrr::map_chr(injury_status, function(x) {
+        val <- if (length(x) == 0) NA_character_ else as.character(x)
+        if (is.na(val)) "ACTIVE" else val
+      }),
       injured = coalesce(injured, FALSE)
     ) %>%
     left_join(franchises, by = "franchise_id") %>%

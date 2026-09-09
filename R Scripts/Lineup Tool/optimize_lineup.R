@@ -31,7 +31,11 @@ build_slot_pools <- function(slots) {
     lapply(function(r) list(pool = r$pool, eligible = r$eligible, capacity = r$capacity))
 
   if (flex_capacity > 0) {
-    pools <- c(pools, list(list(pool = "RB/WR/TE", eligible = c("RB", "WR", "TE"),
+    # Matched against player_eligible_positions()'s "RB/WR/TE" pseudo-position
+    # (espn_lineup_data.R) rather than the three base positions separately -
+    # see the comment there for why splitting into base positions caused
+    # false eligibility for the dedicated single-position pools.
+    pools <- c(pools, list(list(pool = "RB/WR/TE", eligible = "RB/WR/TE",
                                 capacity = flex_capacity)))
   }
   pools
@@ -82,44 +86,40 @@ optimize_starters <- function(roster, slots) {
   select(roster, -row)
 }
 
-# The actual lineup ESPN has right now, by pool - so it can be compared
-# against the optimizer's assignment on equal terms. A player's current_slot
-# ("RB", "WR/TE", "BE", "IR", ...) IS the pool name for anyone already
-# started (see espn_slot_id_map in espn_lineup_data.R), so no re-derivation
-# is needed beyond excluding bench/IR.
-current_assigned_slot <- function(current_slot) {
-  if_else(current_slot %in% c("BE", "IR"), "BE", current_slot)
-}
-
-# Where the optimal lineup differs from what's currently set, as one row per
-# pool with a real swap: bench player -> start player, and the points gained.
-# Pools where the optimizer agrees with the current lineup don't appear.
+# Where the optimal lineup differs from what's currently set: one row per
+# player benched paired with the player who takes their place, by started
+# vs. benched status - not by comparing pool identity 1:1. A dedicated pool
+# can hold more than one player (this league starts 2 RBs, 2 WRs), so
+# comparing "the" current occupant against "the" optimal occupant per pool
+# silently misses swaps beyond the first slot in a pool, and can misattribute
+# a real bench-for-flex swap to the wrong pool entirely. Which specific slot
+# label a started player sits in (dedicated vs. flex) doesn't affect their
+# score, so a player who moves between two started slots needs no action and
+# isn't a swap - only a change between started and benched is.
 compare_lineups <- function(roster_with_optimal) {
   r <- roster_with_optimal %>%
-    mutate(current_pool = current_assigned_slot(current_slot))
+    mutate(current_started = !(current_slot %in% c("BE", "IR")))
 
-  pools <- unique(c(r$assigned_slot, r$current_pool))
-  pools <- setdiff(pools, "BE")
+  leaving <- r %>% filter(current_started & assigned_slot == "BE") %>% arrange(points)
+  arriving <- r %>% filter(!current_started & assigned_slot != "BE") %>% arrange(desc(points))
 
-  out <- lapply(pools, function(p) {
-    now <- r %>% filter(current_pool == p)
-    opt <- r %>% filter(assigned_slot == p)
-    if (nrow(now) == 0 && nrow(opt) == 0) return(NULL)
-    now_id <- if (nrow(now) > 0) now$player_id[1] else NA
-    opt_id <- if (nrow(opt) > 0) opt$player_id[1] else NA
-    if (identical(now_id, opt_id)) return(NULL)
+  n <- max(nrow(leaving), nrow(arriving))
+  if (n == 0) return(tibble())
 
+  at <- function(df, col, i) if (i <= nrow(df)) df[[col]][i] else NA
+
+  out <- lapply(seq_len(n), function(i) {
+    bench_points <- at(leaving, "points", i)
+    start_points <- at(arriving, "points", i)
     tibble(
-      slot = p,
-      bench_player = if (nrow(now) > 0) now$player_name[1] else NA_character_,
-      bench_points = if (nrow(now) > 0) now$points[1] else NA_real_,
-      start_player = if (nrow(opt) > 0) opt$player_name[1] else NA_character_,
-      start_points = if (nrow(opt) > 0) opt$points[1] else NA_real_,
-      gain = (if (nrow(opt) > 0) opt$points[1] else 0) - (if (nrow(now) > 0) now$points[1] else 0)
+      slot = at(arriving, "assigned_slot", i),
+      bench_player = at(leaving, "player_name", i),
+      bench_points = bench_points,
+      start_player = at(arriving, "player_name", i),
+      start_points = start_points,
+      gain = coalesce(start_points, 0) - coalesce(bench_points, 0)
     )
   })
 
-  out <- bind_rows(out)
-  if (nrow(out) == 0) return(out)
-  out %>% arrange(desc(gain))
+  bind_rows(out) %>% arrange(desc(gain))
 }

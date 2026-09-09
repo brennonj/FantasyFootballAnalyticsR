@@ -36,6 +36,14 @@ cat("Pulling week", week, season, "projections...\n")
 
 pos <- c("QB", "RB", "WR", "TE", "K", "DST")
 
+# ffanalytics caches each source's scrape by source name alone - no
+# season/week in the key - and reuses it if scraped recently regardless of
+# which season/week that scrape was actually for. Without this, running
+# pull_season_projections.R (week = 0, i.e. rest-of-season numbers) shortly
+# before this script silently feeds season-long CBS/FantasySharks/etc. stats
+# into what's supposed to be this week's projections, wildly inflating them.
+clear_ffanalytics_cache()
+
 raw_scrape <- scrape_data(
   src = c("CBS", "ESPN", "FantasyPros", "FantasySharks", "FFToday",
           "NumberFire", "RTSports", "Walterfootball"),

@@ -36,15 +36,15 @@ compute_lineup <- function(rosters, franchise_id, slots) {
   current_points <- sum(roster$points[!(roster$current_slot %in% c("BE", "IR"))], na.rm = TRUE)
   optimal_points <- sum(starters$points, na.rm = TRUE)
 
+  # Vectorized rather than rowwise(): rowwise() %>% mutate(if (...) ...) errors
+  # on a zero-row input (dplyr evaluates the expression once against
+  # zero-length columns to check type stability, and if() can't take a
+  # zero-length condition) - and zero flagged players is the common case.
   flags <- starters %>%
     filter(injury_status %in% NEEDS_ATTENTION | (points == 0 & injury_status == "ACTIVE")) %>%
-    rowwise() %>%
-    mutate(note = if (injury_status %in% NEEDS_ATTENTION) {
-      paste0(injury_status, " - verify before kickoff")
-    } else {
-      "projected 0 pts - check for a bye week"
-    }) %>%
-    ungroup() %>%
+    mutate(note = if_else(injury_status %in% NEEDS_ATTENTION,
+                           paste0(injury_status, " - verify before kickoff"),
+                           "projected 0 pts - check for a bye week")) %>%
     select(player_name, pos, note)
 
   list(
