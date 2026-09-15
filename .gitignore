@@ -188,6 +188,7 @@ espn_credentials.R
 #############
 Draft Board TUI/.venv/
 Data/draft_board_snapshot.json
+Data/draft_board_poller.log
 
 #############
 ## Lineup Optimizer TUI - local Python env and generated snapshot, not project code

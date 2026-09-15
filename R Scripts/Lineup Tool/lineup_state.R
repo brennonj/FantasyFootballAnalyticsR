@@ -44,6 +44,7 @@ compute_lineup <- function(rosters, franchise_id, slots) {
   # Vectorized (if_else), not rowwise()+if(): a scalar if() on a zero-row
   # rowwise group - the common case, most weeks nobody needs flagging -
   # throws "argument is of length zero" instead of just producing zero rows.
+  # (Found independently in two sessions the same week - see git history.)
   flags <- starters %>%
     filter(injury_status %in% NEEDS_ATTENTION | (points == 0 & injury_status == "ACTIVE")) %>%
     mutate(note = if_else(injury_status %in% NEEDS_ATTENTION,

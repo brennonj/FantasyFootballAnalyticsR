@@ -45,7 +45,13 @@ espn_pos_id_map <- c(`1` = "QB", `2` = "RB", `3` = "WR", `4` = "TE", `5` = "K", 
 # player (rare) is instead granted BOTH dedicated slot codes directly by
 # ESPN (atomic "RB" and atomic "WR" both present) - so keeping only atomic,
 # real-position tokens recovers that correctly while ignoring flex/OP/BE/IR
-# noise entirely.
+# noise entirely. (A parallel session the same week fixed this same root
+# cause by preserving "RB/WR/TE" as its own pseudo-position instead - a
+# narrower fix that works for build_slot_pools()'s flex-pool matching, but
+# leaves the universal "OP" token on every skill player, which independently
+# broke position matching in the waiver tool - see waiver_analyze.R. This
+# version's plain intersect() drops OP and every other compound too, closing
+# that off in one place instead of two.)
 player_eligible_positions <- function(eligible_slot_names) {
   intersect(eligible_slot_names, c("QB", "RB", "WR", "TE", "K", "DST"))
 }
@@ -99,7 +105,14 @@ espn_full_rosters <- function(conn) {
       current_slot = unname(espn_slot_id_map[as.character(current_slot_id)]),
       eligible_pos = purrr::map(eligible_slot_ids,
                                 ~ unname(espn_slot_id_map[as.character(.x)])),
-      injury_status = coalesce(injury_status, "ACTIVE"),
+      # hoist() leaves injury_status as a list column when some entries are
+      # structurally absent from ESPN's JSON (NULL, not NA) rather than
+      # simplifying to an atomic vector - coalesce() doesn't reach inside a
+      # list column, so normalize element-by-element first.
+      injury_status = purrr::map_chr(injury_status, function(x) {
+        val <- if (length(x) == 0) NA_character_ else as.character(x)
+        if (is.na(val)) "ACTIVE" else val
+      }),
       injured = coalesce(injured, FALSE)
     ) %>%
     left_join(franchises, by = "franchise_id") %>%

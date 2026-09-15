@@ -36,30 +36,35 @@ cat("Pulling week", week, season, "projections...\n")
 
 pos <- c("QB", "RB", "WR", "TE", "K", "DST")
 
-# CBS and FantasySharks are excluded here (unlike the season pull, which uses
-# both fine) - confirmed live on 2026-09-15 that neither respects a
-# week-specific request properly. CBS returned full season totals labeled as
-# "week 2" (Amon-Ra St. Brown: 115 receptions/1289 yards/16 games). Fixing
-# that with a magnitude sanity filter (below) then caught a second, smaller
-# case from FantasySharks - Darren Waller projected for 20.8 receptions/197
-# yards/2.5 TDs in one week, beyond any TE's single-game record - meaning
-# it isn't returning a genuine single week either, just a less obviously
-# wrong one. Two independent bad weekly numbers from the same two sources is
-# a pattern, not noise - drop them from weekly pulls rather than keep
-# patching thresholds around whatever they return next.
+# ffanalytics caches each source's scrape by source name alone - no
+# season/week in the key - and reuses it if scraped recently regardless of
+# which season/week that scrape was actually for. Without this, running
+# pull_season_projections.R (week = 0, i.e. rest-of-season numbers) shortly
+# before this script silently feeds season-long CBS/FantasySharks/etc. stats
+# into what's supposed to be this week's projections, wildly inflating them.
+# This was independently misdiagnosed once (2026-09-15) as "CBS/FantasySharks
+# don't support week-specific requests" and briefly fixed by excluding both
+# sources entirely - confirmed live afterward that the real cause was this
+# cache collision: with the cache cleared, both return correct single-week
+# numbers (CBS: 7.0 rec/77.5 yds/games=1 for a week-2 request, not the
+# 115 rec/1289 yds/games=16 season line it returned when cache-contaminated).
+# Restored to the full source list below.
+clear_ffanalytics_cache()
+
 raw_scrape <- scrape_data(
-  src = c("ESPN", "FantasyPros", "FFToday", "NumberFire", "RTSports", "Walterfootball"),
+  src = c("CBS", "ESPN", "FantasyPros", "FantasySharks", "FFToday",
+          "NumberFire", "RTSports", "Walterfootball"),
   pos = pos,
   season = season,
   week = week
 )
 
-# Defense in depth for whichever sources DO remain: excluding CBS/FantasySharks
-# addresses the two culprits found so far, but doesn't prove no other source
-# (or a future CBS/FantasySharks fix that regresses) will ever misreport a
-# multi-week total as one week's. `games` isn't populated by every source, so
-# it alone won't catch every case - backstop with per-stat single-week
-# ceilings well above any real NFL game (so a genuine boom week is never
+# Defense in depth, now that clear_ffanalytics_cache() addresses the actual
+# cause above: this doesn't prove some other cache/source edge case will
+# never again leak a multi-week total into a weekly pull. `games` isn't
+# populated by every source, so it alone won't catch every case - backstop
+# with per-stat single-week ceilings well above any real NFL game (so a
+# genuine boom week is never
 # flagged); if any one stat blows past its ceiling, drop the whole row.
 week_ceiling <- c(pass_yds = 600, pass_att = 70, pass_tds = 8,
                   rush_att = 45, rush_yds = 300, rush_tds = 6,

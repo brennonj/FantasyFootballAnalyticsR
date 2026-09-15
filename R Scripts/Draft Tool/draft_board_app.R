@@ -225,7 +225,7 @@ server <- function(input, output, session) {
   # slightly stale data beats an empty screen. But the timestamp must not
   # advance on failure, or an expired cookie looks identical to a healthy feed.
   refresh_draft <- function() {
-    d <- tryCatch(suppressWarnings(ff_draft(conn)), error = function(e) NULL)
+    d <- tryCatch(suppressWarnings(fetch_draft(conn)), error = function(e) NULL)
     if (is.null(d)) {
       sync_failed(TRUE)
     } else {

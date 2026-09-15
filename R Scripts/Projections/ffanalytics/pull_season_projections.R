@@ -12,6 +12,12 @@ suppressMessages({
 season <- 2026
 pos <- c("QB", "RB", "WR", "TE", "K", "DST")
 
+# See the matching note in pull_week_projections.R: ffanalytics caches each
+# source's scrape by source name alone, so a week-specific pull run shortly
+# before this one can otherwise leak into this "week = 0" (rest-of-season)
+# scrape too.
+clear_ffanalytics_cache()
+
 raw_scrape <- scrape_data(
   src = c("CBS", "ESPN", "FantasyPros", "FantasySharks", "FFToday",
           "NumberFire", "RTSports", "Walterfootball"),
