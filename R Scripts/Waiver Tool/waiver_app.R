@@ -19,6 +19,7 @@ suppressMessages({
 waiver_tool_dir <- getwd()
 repo_root <- normalizePath(file.path(waiver_tool_dir, "..", ".."))
 source(file.path(waiver_tool_dir, "waiver_setup.R"), local = TRUE)
+source(file.path(repo_root, "R Scripts", "Lineup Tool", "optimize_lineup.R"), local = TRUE)
 source(file.path(waiver_tool_dir, "waiver_analyze.R"), local = TRUE)
 source(file.path(waiver_tool_dir, "waiver_state.R"), local = TRUE)
 
@@ -114,7 +115,7 @@ server <- function(input, output, session) {
     tagList(span(class = "livedot"), paste("synced", format(ts, "%H:%M:%S")))
   })
 
-  board <- reactive(compute_waiver_board(data()$my_roster, data()$free_agents))
+  board <- reactive(compute_waiver_board(data()$my_roster, data()$free_agents, slots))
 
   output$tiles <- renderUI({
     b <- board()

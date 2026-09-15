@@ -110,8 +110,20 @@ attach_scores <- function(df) {
     left_join(week_lookup$by_name %>% select(match_name, week_points_bn = points),
               by = "match_name") %>%
     mutate(
+      # A player absent from a projection source is unevaluated on that
+      # horizon, not "projected zero" - coalescing straight to 0 would treat
+      # an unranked player as replacement-level rather than unknown. Tracked
+      # per horizon, not OR'd together: a real rookie WR with no season
+      # projection at all (never enough of a track record to be ranked) can
+      # still have a real week-2 number from one source, which - before this
+      # fix - was enough to mark him "has_projection" and let his fabricated
+      # 0 season VOR pass as a legitimate value. recommend_adds() requires
+      # BOTH horizons to be real before recommending an add.
+      has_season_projection = !is.na(points_vor) | !is.na(points_vor_bn),
+      has_week_projection = !is.na(week_points) | !is.na(week_points_bn),
       points_vor = coalesce(points_vor, points_vor_bn, 0),
-      week_points = coalesce(week_points, week_points_bn, 0)
+      week_points = coalesce(week_points, week_points_bn, 0),
+      eligible_pos = purrr::map(eligible_pos, player_eligible_positions)
     ) %>%
     select(-match_name, -points_vor_bn, -week_points_bn)
 }

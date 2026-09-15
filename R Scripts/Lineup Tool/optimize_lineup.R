@@ -82,6 +82,20 @@ optimize_starters <- function(roster, slots) {
   select(roster, -row)
 }
 
+# A roster's optimal starting lineup value under a given value column
+# ("points_vor" for season-long, "week_points" for this week) - literally
+# the objective optimize_starters() just solved, repointed at a different
+# number. Shared by the trade evaluator and waiver tool: both ask "does a
+# roster actually start more points because of this move," which is this
+# same lineup-assignment question, not a raw player-value comparison - see
+# Trade Tool/trade_analyze.R for the fuller reasoning.
+lineup_value <- function(roster, slots, value_col) {
+  if (nrow(roster) == 0) return(0)
+  scored <- roster %>% mutate(points = .data[[value_col]])
+  optimized <- optimize_starters(scored, slots)
+  sum(optimized$points[optimized$assigned_slot != "BE"], na.rm = TRUE)
+}
+
 # The actual lineup ESPN has right now, by pool - so it can be compared
 # against the optimizer's assignment on equal terms. A player's current_slot
 # ("RB", "WR/TE", "BE", "IR", ...) IS the pool name for anyone already

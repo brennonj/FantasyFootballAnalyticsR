@@ -31,20 +31,23 @@ espn_slot_id_map <- c(
 
 espn_pos_id_map <- c(`1` = "QB", `2` = "RB", `3` = "WR", `4` = "TE", `5` = "K", `16` = "DST")
 
-# A compound slot name ("RB/WR/TE", ESPN's FLEX) or plain one ("RB") both
-# describe the base positions a player is eligible to start at in that slot.
-# Splitting on "/" handles both without special-casing FLEX/OP.
-slot_base_positions <- function(slot_name) strsplit(slot_name, "/", fixed = TRUE)
-
-# Every base position a player can start at, derived from the union of their
-# eligible ESPN slots (excludes BE/IR, which aren't starting positions).
-# Slot ids outside espn_slot_id_map (IDP/taxi-squad slots this league doesn't
-# use) come in as NA rather than a name - drop those rather than leaking a
-# literal "NA" into the position set.
+# Every REAL position a player can start at - his own dedicated slot(s), not
+# every position covered by a flex slot he also happens to qualify for.
+#
+# ESPN lists a skill player's eligibleSlots as their own dedicated slot PLUS
+# every compound/flex slot that accepts players of their position - e.g. a
+# plain RB's list includes atomic "RB", the compound "RB/WR" and
+# "RB/WR/TE" flex codes, AND the universal "OP" slot every offensive skill
+# player qualifies for. A compound code describes what the SLOT accepts, not
+# what the PLAYER plays: decomposing "RB/WR/TE" and unioning in WR and TE
+# would make an ordinary RB look eligible for a dedicated WR or TE slot,
+# which is impossible in real ESPN. A genuinely dual-position-eligible
+# player (rare) is instead granted BOTH dedicated slot codes directly by
+# ESPN (atomic "RB" and atomic "WR" both present) - so keeping only atomic,
+# real-position tokens recovers that correctly while ignoring flex/OP/BE/IR
+# noise entirely.
 player_eligible_positions <- function(eligible_slot_names) {
-  parts <- unlist(slot_base_positions(eligible_slot_names))
-  parts <- parts[!is.na(parts)]
-  unique(setdiff(parts, c("BE", "IR")))
+  intersect(eligible_slot_names, c("QB", "RB", "WR", "TE", "K", "DST"))
 }
 
 # Current NFL/fantasy week per ESPN. currentMatchupPeriod is the fantasy

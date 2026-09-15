@@ -13,7 +13,12 @@ suppressMessages(library(dplyr))
 # rather than whatever order the optimizer happened to emit them in.
 SLOT_ORDER <- c("QB", "RB", "WR", "TE", "RB/WR/TE", "K", "DST")
 
-NEEDS_ATTENTION <- c("QUESTIONABLE", "DOUBTFUL", "OUT", "IR")
+# ESPN's real injury_status values (confirmed live 2026-09-15) - "IR" is the
+# roster SLOT code (current_slot), not an injury_status value, which is
+# "INJURY_RESERVE" instead. Using "IR" here meant an IR-designated starter
+# was never flagged at all, even though his 0-point projection already
+# correctly kept him out of the optimal lineup on its own.
+NEEDS_ATTENTION <- c("QUESTIONABLE", "DOUBTFUL", "OUT", "INJURY_RESERVE")
 
 # Everything the UI needs for one franchise's week: the optimal lineup, the
 # swaps versus what ESPN currently has set, and anything worth flagging
@@ -36,15 +41,14 @@ compute_lineup <- function(rosters, franchise_id, slots) {
   current_points <- sum(roster$points[!(roster$current_slot %in% c("BE", "IR"))], na.rm = TRUE)
   optimal_points <- sum(starters$points, na.rm = TRUE)
 
+  # Vectorized (if_else), not rowwise()+if(): a scalar if() on a zero-row
+  # rowwise group - the common case, most weeks nobody needs flagging -
+  # throws "argument is of length zero" instead of just producing zero rows.
   flags <- starters %>%
     filter(injury_status %in% NEEDS_ATTENTION | (points == 0 & injury_status == "ACTIVE")) %>%
-    rowwise() %>%
-    mutate(note = if (injury_status %in% NEEDS_ATTENTION) {
-      paste0(injury_status, " - verify before kickoff")
-    } else {
-      "projected 0 pts - check for a bye week"
-    }) %>%
-    ungroup() %>%
+    mutate(note = if_else(injury_status %in% NEEDS_ATTENTION,
+                          paste0(injury_status, " - verify before kickoff"),
+                          "projected 0 pts - check for a bye week")) %>%
     select(player_name, pos, note)
 
   list(

@@ -23,6 +23,7 @@ if (!file.exists(file.path(waiver_tool_dir, "waiver_setup.R"))) {
        file.path(waiver_tool_dir, "waiver_setup.R"), ")")
 }
 source(file.path(waiver_tool_dir, "waiver_setup.R"), local = TRUE)
+source(file.path(repo_root, "R Scripts", "Lineup Tool", "optimize_lineup.R"), local = TRUE)
 source(file.path(waiver_tool_dir, "waiver_analyze.R"), local = TRUE)
 source(file.path(waiver_tool_dir, "waiver_state.R"), local = TRUE)
 
@@ -42,7 +43,7 @@ repeat {
   sync_failed <- is.null(d)
   if (!sync_failed) last_sync <- Sys.time()
 
-  b <- if (!sync_failed) compute_waiver_board(d$my_roster, d$free_agents) else NULL
+  b <- if (!sync_failed) compute_waiver_board(d$my_roster, d$free_agents, slots) else NULL
 
   payload <- list(
     generated_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),

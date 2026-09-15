@@ -7,26 +7,16 @@
 # third; the same player traded to a team starting a replacement-level RB2
 # is worth his whole VOR to them. That's a lineup-assignment question, not a
 # raw-value one - so this reuses the weekly lineup optimizer's ILP
-# (optimize_starters(), from Lineup Tool/optimize_lineup.R) rather than
-# comparing player values directly: it simulates each roster's *optimal
-# starting lineup value* before and after the trade, on both horizons the
-# waiver tool already uses (season VOR for long-term, this week's points for
-# short-term - see waiver_analyze.R for why both matter).
+# (lineup_value()/optimize_starters(), from Lineup Tool/optimize_lineup.R)
+# rather than comparing player values directly: it simulates each roster's
+# *optimal starting lineup value* before and after the trade, on both
+# horizons the waiver tool also uses (season VOR for long-term, this week's
+# points for short-term - see waiver_analyze.R for why both matter).
 #
 # Pure functions only - no Shiny, no network. Requires optimize_lineup.R
-# (optimize_starters) to already be sourced.
+# (lineup_value, optimize_starters) to already be sourced.
 
 suppressMessages(library(dplyr))
-
-# A roster's optimal starting lineup value under a given value column
-# ("points_vor" for season-long, "week_points" for this week) - literally
-# the weekly optimizer's objective, repointed at a different number.
-lineup_value <- function(roster, slots, value_col) {
-  if (nrow(roster) == 0) return(0)
-  scored <- roster %>% mutate(points = .data[[value_col]])
-  optimized <- optimize_starters(scored, slots)
-  sum(optimized$points[optimized$assigned_slot != "BE"], na.rm = TRUE)
-}
 
 # Evaluates a hypothetical (or real, proposed) trade for both sides: swap
 # `receives` into `roster` in place of `gives_ids`, and see how each side's

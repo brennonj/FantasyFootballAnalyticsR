@@ -51,7 +51,10 @@ POS_COLORS = {
     "TE": "#c98500", "K": "#d55181", "DST": "#008300",
 }
 GOOD, WARN, CRIT, MUTED = "#0ca30c", "#fab219", "#d03b3b", "#898781"
-NEEDS_ATTENTION = {"QUESTIONABLE", "DOUBTFUL", "OUT", "IR"}
+# Matches lineup_state.R's NEEDS_ATTENTION - ESPN's real injury_status value
+# is "INJURY_RESERVE", not "IR" (that's the roster slot code, a different
+# field) - confirmed live 2026-09-15.
+NEEDS_ATTENTION = {"QUESTIONABLE", "DOUBTFUL", "OUT", "INJURY_RESERVE"}
 
 DEFAULT_SNAPSHOT = Path(__file__).resolve().parent.parent / "Data" / "lineup_snapshot.json"
 
