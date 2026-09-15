@@ -115,13 +115,15 @@ server <- function(input, output, session) {
     tagList(span(class = "livedot"), paste("synced", format(ts, "%H:%M:%S")))
   })
 
-  board <- reactive(compute_waiver_board(data()$my_roster, data()$free_agents, slots))
+  board <- reactive(compute_waiver_board(data()$my_roster, data()$free_agents, slots,
+                                         max_roster_size = roster_size))
 
   output$tiles <- renderUI({
     b <- board()
     div(class = "tiles",
       div(class = "tile", div(class = "micro", "Free agents scanned"), div(class = "val", b$pool_size)),
-      div(class = "tile", div(class = "micro", "Your roster"), div(class = "val", b$roster_size)),
+      div(class = "tile", div(class = "micro", "Your roster"), div(class = "val", b$roster_count)),
+      div(class = "tile", div(class = "micro", "Open roster spots"), div(class = "val", b$open_slots)),
       div(class = "tile", div(class = "micro", "Worthwhile adds found"), div(class = "val", nrow(b$recommendations)))
     )
   })
@@ -136,7 +138,7 @@ server <- function(input, output, session) {
           div(class = "row-name",
               tags$b(a$player_name),
               span(class = "row-arrow", HTML("&rarr;")),
-              paste0("drop ", a$drop_player),
+              if (is.na(a$drop_player)) "open roster spot, no drop needed" else paste0("drop ", a$drop_player),
               br(),
               span(class = "row-why", a$why)),
           div(class = "row-score", paste0("+", a$score))

@@ -42,23 +42,41 @@ suppressMessages(library(dplyr))
 
 # The weakest rostered player a free agent could actually replace: among
 # players eligible for at least one of the same base positions, the one with
-# the lowest season-long VOR. That's who a manager would really cut - not
-# the best player at the position, and not restricted to bench-only, since a
-# free agent can also be a real upgrade over a struggling starter. This is
-# only a starting guess for WHO to drop, not the basis for how much the move
-# is worth - see recommend_adds() for that.
+# the lowest season-long VOR - preferring the bench. Season VOR alone isn't
+# a safe way to reach into the active lineup: a player can be a fine, even
+# good, START for THIS week while still projecting as the worst asset at his
+# position for the rest of the season (2026-09-16: Jayden Reed, this
+# league's actual started flex play that week, had the single lowest season
+# VOR of any rostered WR - a hair below a benched one - and got proposed as
+# the drop purely because of that razor-thin margin, even though cutting him
+# meant immediately needing to replace him in the real lineup with an
+# unproven waiver add). Only fall through to a starter when no bench player
+# at a matching position exists at all - the same reasoning the standing
+# "value leads, timing adjusts" score already applies elsewhere: touching
+# the active lineup is a real cost recommend_adds()'s gain calculation
+# doesn't otherwise price in, so it shouldn't be reached for on a coin-flip
+# margin against an available bench cut.
 worst_replaceable <- function(roster, target_eligible_pos) {
   candidates <- roster %>%
     filter(vapply(eligible_pos, function(e) any(target_eligible_pos %in% e), logical(1)))
   if (nrow(candidates) == 0) return(NULL)
-  candidates %>% arrange(points_vor) %>% slice(1)
+
+  bench <- candidates %>% filter(current_slot %in% c("BE", "IR"))
+  pool <- if (nrow(bench) > 0) bench else candidates
+  pool %>% arrange(points_vor) %>% slice(1)
 }
 
 # free_agents / roster: player_id, player_name, pos, eligible_pos (list-col),
 #   injury_status, percent_owned, percent_change, points_vor (season, VOR-
 #   baselined), week_points (this week's projection)
 # slots: data.frame of pos, min, max, as returned by ff_starter_positions()
-recommend_adds <- function(free_agents, roster, slots, top_n = 15) {
+# roster_size: total roster slots (starters + bench + IR) from ff_league() -
+#   when the roster isn't already full (e.g. a player just moved to IR,
+#   opening a real bench spot - caught live, 2026-09-16), the best move is
+#   often a plain add with nobody dropped, which a drop-required search can
+#   never surface. Optional (NA skips this) only because older callers/tests
+#   may not have it.
+recommend_adds <- function(free_agents, roster, slots, roster_size = NA_integer_, top_n = 15) {
   if (nrow(free_agents) == 0 || nrow(roster) == 0) return(tibble())
 
   long_before <- lineup_value(roster, slots, "points_vor")
@@ -70,44 +88,80 @@ recommend_adds <- function(free_agents, roster, slots, top_n = 15) {
   # rookie with a week-2 number but no season projection at all) would
   # otherwise get a fabricated 0 on the other, silently misrepresenting an
   # unknown value as a known, replacement-level one.
-  candidates <- free_agents %>%
-    filter(has_season_projection, has_week_projection) %>%
-    rowwise() %>%
-    mutate(drop = list(worst_replaceable(roster, eligible_pos))) %>%
-    ungroup() %>%
-    filter(!vapply(drop, is.null, logical(1)))
+  eligible_fas <- free_agents %>% filter(has_season_projection, has_week_projection)
+  if (nrow(eligible_fas) == 0) return(tibble())
 
-  if (nrow(candidates) == 0) return(tibble())
+  score_after <- function(after_roster) {
+    long_gain <- round(lineup_value(after_roster, slots, "points_vor") - long_before, 1)
+    short_gain <- round(lineup_value(after_roster, slots, "week_points") - short_before, 1)
+    list(long_gain = long_gain, short_gain = short_gain,
+         score = round(short_gain + 0.4 * long_gain, 1))
+  }
 
-  out <- candidates %>%
-    rowwise() %>%
-    mutate(
-      drop_player = drop$player_name,
-      drop_pos = drop$pos,
-      after_roster = list(
-        bind_rows(
-          roster %>% filter(player_id != drop$player_id),
-          tibble(player_id = player_id, player_name = player_name, pos = pos,
-                 points_vor = points_vor, week_points = week_points,
-                 eligible_pos = list(eligible_pos))
-        )
-      ),
-      long_term_gain = round(lineup_value(after_roster, slots, "points_vor") - long_before, 1),
-      short_term_gain = round(lineup_value(after_roster, slots, "week_points") - short_before, 1),
-      score = round(short_term_gain + 0.4 * long_term_gain, 1)
-    ) %>%
-    ungroup() %>%
-    select(-drop, -after_roster) %>%
-    filter(score > 0) %>%
-    arrange(desc(score)) %>%
-    slice_head(n = top_n) %>%
+  fa_row <- function(fa) tibble(player_id = fa$player_id, player_name = fa$player_name,
+                                pos = fa$pos, points_vor = fa$points_vor,
+                                week_points = fa$week_points, eligible_pos = list(fa$eligible_pos))
+
+  open_slots <- if (is.na(roster_size)) 0L else max(roster_size - nrow(roster), 0L)
+
+  # A roster spot open at all (ESPN bench slots take any position) beats
+  # cutting someone to make room every time - adding a player can never make
+  # the optimizer's chosen lineup worse, while removing one can only ever
+  # help or be neutral for HIM at best. So when a slot is open, skip the
+  # drop-required search entirely rather than compute numbers a real open
+  # slot would always match or beat.
+  if (open_slots > 0) {
+    out <- eligible_fas %>%
+      rowwise() %>%
+      mutate(
+        gains = list(score_after(bind_rows(roster, fa_row(pick(everything()))))),
+        drop_player = NA_character_,
+        drop_pos = NA_character_,
+        long_term_gain = gains$long_gain,
+        short_term_gain = gains$short_gain,
+        score = gains$score
+      ) %>%
+      ungroup() %>%
+      select(-gains) %>%
+      filter(score > 0) %>%
+      arrange(desc(score)) %>%
+      slice_head(n = top_n)
+  } else {
+    candidates <- eligible_fas %>%
+      rowwise() %>%
+      mutate(drop = list(worst_replaceable(roster, eligible_pos))) %>%
+      ungroup() %>%
+      filter(!vapply(drop, is.null, logical(1)))
+
+    if (nrow(candidates) == 0) return(tibble())
+
+    out <- candidates %>%
+      rowwise() %>%
+      mutate(
+        drop_player = drop$player_name,
+        drop_pos = drop$pos,
+        gains = list(score_after(bind_rows(
+          roster %>% filter(player_id != drop$player_id), fa_row(pick(everything()))
+        ))),
+        long_term_gain = gains$long_gain,
+        short_term_gain = gains$short_gain,
+        score = gains$score
+      ) %>%
+      ungroup() %>%
+      select(-drop, -gains) %>%
+      filter(score > 0) %>%
+      arrange(desc(score)) %>%
+      slice_head(n = top_n)
+  }
+
+  if (nrow(out) == 0) return(out)
+
+  out %>%
     rowwise() %>%
     mutate(why = build_waiver_reason(player_name, pos, injury_status, percent_owned,
                                      percent_change, drop_player, drop_pos,
                                      long_term_gain, short_term_gain)) %>%
     ungroup()
-
-  out
 }
 
 build_waiver_reason <- function(player, pos, injury_status, pct_owned, pct_change,
@@ -115,7 +169,11 @@ build_waiver_reason <- function(player, pos, injury_status, pct_owned, pct_chang
   bits <- character(0)
 
   bits <- c(bits, sprintf("%s%.1f pts this week (starting lineup impact)", if (short_gain >= 0) "+" else "", short_gain))
-  bits <- c(bits, sprintf("+%.0f season VOR · drop %s", long_gain, drop_player))
+  bits <- c(bits, if (is.na(drop_player)) {
+    sprintf("+%.0f season VOR · fills your open roster spot, no drop needed", long_gain)
+  } else {
+    sprintf("+%.0f season VOR · drop %s", long_gain, drop_player)
+  })
   if (!is.na(injury_status) && injury_status != "ACTIVE") {
     bits <- c(bits, injury_status)
   }

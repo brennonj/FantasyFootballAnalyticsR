@@ -80,14 +80,15 @@ class Tiles(Static):
     def render(self):
         d = self.data
         table = Table.grid(expand=True, padding=(0, 2))
-        for _ in range(3):
+        for _ in range(4):
             table.add_column(ratio=1)
         if not d:
-            table.add_row("—", "—", "—")
+            table.add_row("—", "—", "—", "—")
             return Panel(table, border_style=MUTED)
         table.add_row(
             Text.assemble(("Free agents scanned\n", MUTED), (str(d.get("pool_size", "—")), "bold")),
-            Text.assemble(("Your roster\n", MUTED), (str(d.get("roster_size", "—")), "bold")),
+            Text.assemble(("Your roster\n", MUTED), (str(d.get("roster_count", "—")), "bold")),
+            Text.assemble(("Open spots\n", MUTED), (str(d.get("open_slots", "—")), "bold")),
             Text.assemble(("Worthwhile adds\n", MUTED),
                            (str(len(d.get("recommendations") or [])), "bold")),
         )
@@ -106,8 +107,9 @@ class Recommendations(Static):
         grid.add_column(ratio=1)
         grid.add_column(justify="right", width=6)
         for r in self.recs:
+            drop_text = "open roster spot, no drop needed" if r.get("drop_player") is None else f"drop {r['drop_player']}"
             name = Text.assemble(
-                (r["player"] + " ", "bold white"), ("-> drop ", MUTED), (r["drop_player"], "white"),
+                (r["player"] + " ", "bold white"), ("-> ", MUTED), (drop_text, "white"),
             )
             why = Text(r["why"], style=MUTED)
             grid.add_row(pos_badge(r["pos"]), Text.assemble(name, "\n", why), Text(f"+{r['score']}", style=f"bold {GOOD}"))

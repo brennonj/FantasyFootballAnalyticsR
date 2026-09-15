@@ -26,6 +26,13 @@ conn <- espn_league_connect(espn_league_id, espn_season, espn_s2, espn_swid)
 slots <- ff_starter_positions(conn) %>%
   transmute(pos = unname(as.character(pos)), min = as.integer(min), max = as.integer(max))
 
+# Total roster slots (starters + bench + IR combined - this league's IR slot
+# is one of the 17, not extra beyond it). A player moving to IR still
+# occupies a slot, but if the roster wasn't already full, that can leave a
+# real open bench spot - recommend_adds() needs this to tell "add someone,
+# no drop needed" apart from "you must cut someone to make room."
+roster_size <- ff_league(conn)$roster_size
+
 franchises <- ff_franchises(conn)
 my_franchise_id <- franchises$franchise_id[franchises$franchise_name == espn_team_name]
 if (length(my_franchise_id) == 0) {

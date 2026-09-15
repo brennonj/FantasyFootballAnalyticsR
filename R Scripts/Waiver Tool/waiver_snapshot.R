@@ -43,7 +43,8 @@ repeat {
   sync_failed <- is.null(d)
   if (!sync_failed) last_sync <- Sys.time()
 
-  b <- if (!sync_failed) compute_waiver_board(d$my_roster, d$free_agents, slots) else NULL
+  b <- if (!sync_failed) compute_waiver_board(d$my_roster, d$free_agents, slots,
+                                              max_roster_size = roster_size) else NULL
 
   payload <- list(
     generated_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%S%z"),
@@ -53,7 +54,8 @@ repeat {
     season = espn_season,
     week = current_week,
     pool_size = if (is.null(b)) NA else b$pool_size,
-    roster_size = if (is.null(b)) NA else b$roster_size,
+    roster_count = if (is.null(b)) NA else b$roster_count,
+    open_slots = if (is.null(b)) NA else b$open_slots,
     recommendations = if (is.null(b) || nrow(b$recommendations) == 0) list() else
       lapply(seq_len(nrow(b$recommendations)), function(i) { r <- b$recommendations[i, ]; list(
         player = r$player_name, pos = r$pos,
